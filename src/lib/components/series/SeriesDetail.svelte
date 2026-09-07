@@ -300,6 +300,10 @@
   async function toggleLibrary() {
     if (!manga || !realMediaId || togglingLibrary) return
     const next = !manga.inLibrary
+    if (!next && mangaFolders.length && !confirm(
+      `This series is in ${mangaFolders.length === 1 ? `the "${mangaFolders[0].name}" folder` : `${mangaFolders.length} folders`}. `
+      + `Removing it from the library also removes it from ${mangaFolders.length === 1 ? 'that folder' : 'those folders'}. Continue?`
+    )) return
     togglingLibrary = true
     try {
       await tsunagu.setInLibrary(realMediaId, next)

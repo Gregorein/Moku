@@ -1,9 +1,8 @@
 <script lang="ts">
   import {
-    MagnifyingGlass, Books, DownloadSimple, Folder, FolderSimple,
+    MagnifyingGlass, Books, DownloadSimple, Folder, ArrowsClockwise,
     SortAscending, CaretUp, CaretDown, Star, X, CheckSquare, SquaresFour, Rows, Broadcast,
   } from "phosphor-svelte";
-  import { canOpenFolder }  from "$lib/core/filesystem";
   import LibraryFilters from "./LibraryFilters.svelte";
   import type { Folder as FolderType } from "$lib/server-adapters/types";
   import type { LibrarySortOption, LibrarySortDir, LibraryStatusFilter, LibraryContentFilter, LibraryViewMode } from "$lib/state/library.svelte";
@@ -39,7 +38,8 @@
     onSortPanelToggle:   () => void;
     onFilterPanelToggle: () => void;
     onViewModeChange:    (mode: LibraryViewMode) => void;
-    onOpenDownloadsFolder: () => void;
+    refreshingLibrary:   boolean;
+    onRefreshLibrary:    () => void;
     onTabDragStart:      (e: DragEvent, id: string) => void;
     onTabDragOver:       (e: DragEvent, id: string, idx: number) => void;
     onTabDragLeave:      () => void;
@@ -56,7 +56,7 @@
     tabsEl = $bindable(),
     onSearchChange, onTabChange, onSortChange, onSortDirToggle, onStatusChange,
     onFilterToggle, onFiltersClear, onSortPanelToggle, onFilterPanelToggle,
-    onViewModeChange, onOpenDownloadsFolder,
+    onViewModeChange, refreshingLibrary, onRefreshLibrary,
     onTabDragStart, onTabDragOver, onTabDragLeave, onTabDrop, onTabDragEnd,
     onTabContextMenu,
   }: Props = $props();
@@ -159,11 +159,14 @@
       {:else}<SquaresFour size={15} weight="bold" />{/if}
     </button>
 
-    {#if canOpenFolder()}
-      <button class="icon-btn" title="Open downloads folder" onclick={onOpenDownloadsFolder}>
-        <FolderSimple size={15} weight="bold" />
-      </button>
-    {/if}
+    <button
+      class="icon-btn"
+      title={refreshingLibrary ? "Updating library…" : "Update every series in the library"}
+      disabled={refreshingLibrary}
+      onclick={onRefreshLibrary}
+    >
+      <ArrowsClockwise size={15} weight="bold" class={refreshingLibrary ? "anim-spin" : undefined} />
+    </button>
 
     <button
       class="icon-btn"

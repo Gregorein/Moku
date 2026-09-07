@@ -113,7 +113,7 @@
     {:else}
       <div class="hero-tags">
         {#if activeSlot?.kind === 'continue'}
-          <span class="hero-tag hero-tag-reading"><Play size={8} weight="fill" /> Reading</span>
+          <span class="hero-tag hero-tag-reading"><Play size={8} weight="fill" /> {heroManga?.contentType === 'ANIME' ? 'Watching' : 'Reading'}</span>
         {:else}
           <span class="hero-tag hero-tag-pinned"><PushPin size={8} weight="fill" /> Pinned</span>
         {/if}

@@ -92,6 +92,18 @@ inputs.moku.url = "github:moku-project/Moku";
 
 The Nix app pulls the Tsunagu backend from its flake and launches it for you. AppImage / deb packaging is a work in progress.
 
+### Linux (Arch, from git)
+
+[`packaging/PKGBUILD`](packaging/PKGBUILD) builds the app from the latest commit:
+
+```bash
+git clone https://github.com/moku-project/Moku
+cd Moku/packaging
+makepkg -si
+```
+
+This packages the frontend only — install a `tsunagu` package or set `TSUNAGU_BIN` so the app has a backend to talk to (the `/usr/bin/moku` wrapper defaults `TSUNAGU_BIN` to `/usr/bin/tsunagu` when present).
+
 #### Binary cache (Cachix)
 
 Prebuilt artifacts are pushed to [`moku.cachix.org`](https://app.cachix.org/cache/moku) so you don't have to compile Moku or Tsunagu locally.

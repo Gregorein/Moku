@@ -5,7 +5,7 @@
   import TrackerPanel from '$lib/components/series/panels/TrackerPanel.svelte'
   import { resolvedCover } from '$lib/core/cover/coverResolver'
   import { settingsState } from '$lib/state/settings.svelte'
-  import { trackerState } from '$lib/state/trackers.svelte'
+  import { trackerState, statusLabel } from '$lib/state/trackers.svelte'
   import { trackingState } from '$lib/state/tracking.svelte'
   import { loadLibrary } from '$lib/state/library.svelte'
   import type { Manga } from '$lib/types'
@@ -257,13 +257,14 @@
             {#if m.trackLinks?.length}
               {@const link = m.trackLinks[0]}
               {@const total = link.totalChapters || m.chapters?.totalCount || 0}
+              {@const statusText = statusLabel(link.status, trackerState.byKey(link.trackerKey), m.contentType)}
               <button
                 class="track-strip"
-                title={`${link.statusName} · ${link.lastChapterRead}/${total || '?'}${m.trackLinks.length > 1 ? ` · +${m.trackLinks.length - 1} more` : ''}`}
+                title={`${statusText} · ${link.lastChapterRead}/${total || '?'}${m.trackLinks.length > 1 ? ` · +${m.trackLinks.length - 1} more` : ''}`}
                 onclick={(e) => { e.stopPropagation(); trackManga = m }}
               >
                 <TrackerLogo trackerKey={link.trackerKey} iconUrl={trackIcon(link.trackerKey)} size={14} />
-                <span class="track-text">{link.statusName} · {link.lastChapterRead}/{total || '?'}</span>
+                <span class="track-text">{statusText} · {link.lastChapterRead}/{total || '?'}</span>
               </button>
             {/if}
             {#if selectMode}

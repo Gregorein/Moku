@@ -19,7 +19,7 @@
     Trash, CheckSquare, ArrowSquareOut, ArrowsClockwise,
     PencilSimple, Star, Eye, EyeSlash,
   } from 'phosphor-svelte'
-  import { openMangaFolder, openDownloadsFolder } from '$lib/core/filesystem'
+  import { openMangaFolder } from '$lib/core/filesystem'
 
   const SIDEBAR_W      = 52
   const TITLEBAR_H     = 36
@@ -65,6 +65,13 @@
   }
 
   async function doRemove(m: Manga) {
+    const inFolders = libraryState.folders
+      .filter(f => (libraryState.folderMangaMap.get(f.id) ?? []).some(x => x.id === m.id))
+      .map(f => f.name)
+    if (inFolders.length && !confirm(
+      `"${m.title}" is in ${inFolders.length === 1 ? `the "${inFolders[0]}" folder` : `${inFolders.length} folders`}. `
+      + `Removing it from the library also removes it from ${inFolders.length === 1 ? 'that folder' : 'those folders'}. Continue?`
+    )) return
     try {
       await tsunagu.removeFromLibrary(m.id)
       await loadLibrary(true)
@@ -147,14 +154,53 @@
   }
 
   async function onBulkRemove() {
+    const ids = [...libraryState.selected]
+    const foldered = ids.filter(id =>
+      libraryState.folders.some(f => (libraryState.folderMangaMap.get(f.id) ?? []).some(x => x.id === id))
+    ).length
+    if (foldered && !confirm(
+      `${foldered} of ${ids.length} selected ${foldered === 1 ? 'series is' : 'series are'} in folders. `
+      + `Removing from the library also removes them from those folders. Continue?`
+    )) return
     bulkWorking = true
     try {
       await Promise.allSettled(
-        [...libraryState.selected].map(id => tsunagu.removeFromLibrary(id))
+        ids.map(id => tsunagu.removeFromLibrary(id))
       )
       await loadLibrary(true)
       libraryState.exitSelect()
     } finally { bulkWorking = false }
+  }
+
+  async function runLibraryRefresh() {
+    if (libraryState.refreshing || libraryState.refreshingFolderId !== null) return
+    libraryState.refreshing = true
+    try {
+      const started = await tsunagu.startLibraryUpdate()
+      let status = await tsunagu.libraryUpdateStatus()
+      if (!started && !status.running) {
+        addToast({ kind: 'error', title: 'Update failed', body: 'Could not start library update.' })
+        return
+      }
+      while (status.running) {
+        await new Promise(r => setTimeout(r, 1500))
+        status = await tsunagu.libraryUpdateStatus()
+      }
+      await loadLibrary(true)
+      const n = status.newChapterCount
+      addToast({
+        kind:  n > 0 ? 'success' : 'info',
+        title: 'Library update complete',
+        body:  n > 0 ? `${n} new chapter${n === 1 ? '' : 's'}` : 'No new chapters',
+      })
+      if (status.failedTitles.length) {
+        addToast({ kind: 'error', title: `${status.failedTitles.length} series failed to update`, body: status.failedTitles.slice(0, 3).join(', ') })
+      }
+    } catch (e: any) {
+      addToast({ kind: 'error', title: 'Update failed', body: e?.message ?? String(e) })
+    } finally {
+      libraryState.refreshing = false
+    }
   }
 
   async function refreshFolder(folderId: string) {
@@ -385,7 +431,8 @@
       onFiltersClear={() => libraryState.clearTabFilters(libraryState.tab)}
       onFilterPanelToggle={() => filterPanelOpen = !filterPanelOpen}
       onViewModeChange={(mode) => libraryState.setViewMode(mode)}
-      onOpenDownloadsFolder={openDownloadsFolder}
+      refreshingLibrary={libraryState.refreshing}
+      onRefreshLibrary={runLibraryRefresh}
       onTabDragStart={onTabDragStart}
       onTabDragOver={onTabDragOver}
       onTabDragLeave={onTabDragLeave}

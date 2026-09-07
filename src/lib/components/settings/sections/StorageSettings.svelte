@@ -11,6 +11,7 @@
   import { clearBlobCache } from '$lib/core/cache/imageCache'
   import { cache as queryCache } from '$lib/core/cache/queryCache'
   import { tsunagu } from '$lib/server-adapters/tsunagu'
+  import { canOpenFolder, openCustomFolder } from '$lib/core/filesystem'
 
   const supportsFilesystem = platformService.isSupported('filesystem')
 
@@ -489,6 +490,9 @@
           oninput={() => { pathsFieldError = { ...pathsFieldError, dl: undefined } }} />
         {#if !isExternalServer && supportsFilesystem}
           <button class="s-btn" onclick={browseDownloadsFolder}>Browse</button>
+        {/if}
+        {#if canOpenFolder()}
+          <button class="s-btn" onclick={() => openCustomFolder(confirmedDownloadsPath.trim() || defaultDownloadsPath)}>Open folder</button>
         {/if}
       </div>
       <div class="s-row">
