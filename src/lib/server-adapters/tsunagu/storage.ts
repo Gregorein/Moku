@@ -28,6 +28,17 @@ export const storage = {
 		return data.clearStorageCategory
 	},
 
+	async relocateDownloads(newPath: string, migrate: boolean): Promise<{ newPath: string; migrated: boolean; movedFiles: number; movedBytes: number }> {
+		const data = await gql<{ relocateDownloads: { newPath: string; migrated: boolean; movedFiles: number; movedBytes: number } }>(
+			`mutation RelocateDownloads($newPath: String!, $migrate: Boolean!) {
+				relocateDownloads(newPath: $newPath, migrate: $migrate) { newPath migrated movedFiles movedBytes }
+			}`,
+			{ newPath, migrate },
+			baseUrl(),
+		)
+		return data.relocateDownloads
+	},
+
 	async databaseBackups(): Promise<DatabaseBackup[]> {
 		const data = await gql<{ databaseBackups: DatabaseBackup[] }>(
 			`query DatabaseBackups { databaseBackups { ${BACKUP_FIELDS} } }`,

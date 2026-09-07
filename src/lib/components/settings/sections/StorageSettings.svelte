@@ -159,7 +159,6 @@
   let migrating       = $state(false)
   let migrateProgress = $state<{ done: number; total: number; current: string } | null>(null)
   let migrateError    = $state<string | null>(null)
-  let migrateUnlisten: (() => void) | null = null
 
   let extraScanDirs     = $state<string[]>([...(settingsState.settings.extraScanDirs ?? [])])
   let newScanDir        = $state('')
@@ -214,39 +213,54 @@
     pathsError = null; pathsFieldError = {}
     const [dlErr, locErr] = await Promise.all([validatePath(dl), validatePath(loc)])
     if (dlErr || locErr) { pathsFieldError = { ...(dlErr ? { dl: dlErr } : {}), ...(locErr ? { loc: locErr } : {}) }; return }
-    pathsSaving = true
-    try {
-      updateSettings({ serverDownloadsPath: dl, serverLocalSourcePath: loc })
-      if (supportsFilesystem && !isExternalServer) {
-        const oldDl = confirmedDownloadsPath || defaultDownloadsPath
-        const newDl = dl || defaultDownloadsPath
-        if (newDl && oldDl && newDl !== oldDl) {
-          const hadContent = await platformService.checkPathExists(oldDl)
-          if (hadContent) { migrateFrom = oldDl; migrateTo = newDl }
-        }
-      }
-      confirmedDownloadsPath = dl; confirmedLocalSourcePath = loc
+
+    if (loc !== confirmedLocalSourcePath) {
+      updateSettings({ serverLocalSourcePath: loc })
+      confirmedLocalSourcePath = loc
+    }
+
+    const newDl = dl || defaultDownloadsPath
+    const oldDl = confirmedDownloadsPath || defaultDownloadsPath
+    if (dl === confirmedDownloadsPath || (newDl && oldDl && newDl === oldDl)) {
       pathsSaved = true; setTimeout(() => pathsSaved = false, 2000)
-      await fetchStorage()
-    } catch (e: any) {
-      pathsError = e?.message ?? 'Failed to save paths'
-    } finally { pathsSaving = false }
+      return
+    }
+    // A downloads-path change is applied server-side: prompt for migration.
+    migrateFrom = oldDl; migrateTo = dl
+    migrateError = null
   }
 
-  async function startMigration() {
-    if (!migrateFrom || !migrateTo) return
-    migrating = true; migrateError = null; migrateProgress = { done: 0, total: 0, current: '' }
-    migrateUnlisten = await platformService.onMigrateProgress(p => { migrateProgress = p })
+  async function applyRelocation(migrate: boolean) {
+    if (migrateTo === null) return
+    migrating = true; migrateError = null
+    migrateProgress = migrate ? { done: 0, total: 0, current: 'Moving files…' } : null
     try {
-      await platformService.migrateDownloads(migrateFrom, migrateTo)
+      const res = await tsunagu.relocateDownloads(migrateTo, migrate)
+      updateSettings({ serverDownloadsPath: migrateTo })
+      confirmedDownloadsPath = migrateTo
+      downloadsPathInput = migrateTo
       migrateFrom = null; migrateTo = null; migrateProgress = null
-      await fetchStorage()
+      pathsSaved = true; setTimeout(() => pathsSaved = false, 2000)
+      toast({
+        kind: 'success',
+        title: migrate ? 'Downloads migrated' : 'Downloads path changed',
+        body: migrate
+          ? `Moved ${res.movedFiles} ${res.movedFiles === 1 ? 'file' : 'files'} (${fmtBytes(res.movedBytes)}) to ${res.newPath}`
+          : `New downloads go to ${res.newPath}. Existing files stay where they are.`,
+      })
+      await Promise.all([fetchStorage(), loadServerStorage()])
     } catch (e: any) {
-      migrateError = e?.message ?? 'Migration failed'
-    } finally { migrating = false; migrateUnlisten?.(); migrateUnlisten = null }
+      migrateError = e?.message ?? 'Failed to change downloads path'
+    } finally { migrating = false }
   }
 
-  function dismissMigration() { migrateFrom = null; migrateTo = null; migrateError = null; migrateProgress = null }
+  const startMigration = () => applyRelocation(true)
+  const switchWithoutMigration = () => applyRelocation(false)
+
+  function dismissMigration() {
+    downloadsPathInput = confirmedDownloadsPath
+    migrateFrom = null; migrateTo = null; migrateError = null; migrateProgress = null
+  }
 
   async function browseDownloadsFolder() {
     const picked = await platformService.pickFolder()
@@ -390,22 +404,21 @@
 
 <div class="s-panel">
 
-  {#if migrateFrom && !isExternalServer}
+  {#if migrateTo !== null}
     <div class="s-migrate-banner">
       <div class="s-migrate-body">
-        <span class="s-migrate-title">Manga found at the previous path. Move it?</span>
-        <span class="s-migrate-paths">{migrateFrom} → {migrateTo}</span>
-        {#if migrateProgress && migrateProgress.total > 0}
-          <div class="s-migrate-bar"><div class="s-migrate-fill" style="width:{Math.round((migrateProgress.done/migrateProgress.total)*100)}%"></div></div>
-          <span class="s-migrate-paths">{migrateProgress.current} · {migrateProgress.done} / {migrateProgress.total}</span>
-        {/if}
+        <span class="s-migrate-title">Move existing downloads to the new path?</span>
+        <span class="s-migrate-paths">{migrateFrom || 'current path'} → {migrateTo || 'server default'}</span>
+        <span class="s-desc">Migrate moves every downloaded chapter and episode and updates the library. Switch without moving keeps existing files where they are and only sends new downloads to the new path.</span>
+        {#if migrating && !migrateProgress}<span class="s-desc">Working…</span>{/if}
         {#if migrateError}<span class="s-desc" style="color:var(--color-error)">{migrateError}</span>{/if}
       </div>
       <div class="s-migrate-actions">
         <button class="s-btn s-btn-accent" onclick={startMigration} disabled={migrating}>
-          {migrating ? (migrateProgress ? `Moving… ${migrateProgress.done}/${migrateProgress.total}` : 'Starting…') : 'Move files'}
+          {migrating ? 'Migrating…' : 'Migrate'}
         </button>
-        <button class="s-btn" onclick={dismissMigration} disabled={migrating}>Skip</button>
+        <button class="s-btn" onclick={switchWithoutMigration} disabled={migrating}>Switch without moving</button>
+        <button class="s-btn" onclick={dismissMigration} disabled={migrating}>Cancel</button>
       </div>
     </div>
   {/if}
