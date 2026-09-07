@@ -224,7 +224,10 @@
       try {
         await tsunagu.syncRepository(repo.id);
         await load();
-        if (serverTab) await resetBrowse();
+        panel = null;
+        filter = "available";
+        langFilter = null;
+        await resetBrowse();
       } catch (e) { console.error(e); }
     } catch (e: any) {
       repoError = e instanceof Error ? e.message : "Failed to save";
