@@ -28,9 +28,38 @@ const LABELS: Record<SourceErrorCode, { label: string; retriable: boolean; expec
 	INTERNAL:            { label: 'Something went wrong',     retriable: true,  expected: false },
 }
 
+function errorText(e: unknown): string {
+	if (typeof e === 'string') return e
+	if (e instanceof Error) return e.message
+	return ''
+}
+
+function isTimeout(e: unknown): boolean {
+	const grpc = e instanceof GraphQLError ? e.grpc : ''
+	if (grpc === 'DeadlineExceeded' || grpc === 'Canceled') return true
+	return /DeadlineExceeded|deadline exceeded/i.test(errorText(e))
+}
+
 export function sourceErrorCode(e: unknown): SourceErrorCode | null {
-	const raw = e instanceof GraphQLError ? e.code : undefined
-	if (raw && raw in LABELS) return raw as SourceErrorCode
+	if (e instanceof GraphQLError) {
+		const raw = e.code
+		if (raw && raw in LABELS) return raw as SourceErrorCode
+		if (e.grpc === 'DeadlineExceeded' || e.grpc === 'Canceled') return 'SOURCE_NETWORK'
+		if (e.grpc === 'Unavailable') return 'SOURCE_UNAVAILABLE'
+		if (e.grpc === 'NotFound') return 'SOURCE_NOT_FOUND'
+		if (e.grpc === 'ResourceExhausted') return 'SOURCE_RATE_LIMITED'
+		if (e.grpc === 'FailedPrecondition') return 'SOURCE_CLOUDFLARE'
+		if (e.grpc === 'DataLoss') return 'SOURCE_PARSE'
+	}
+	const msg = errorText(e)
+	if (!msg) return null
+	if (isTimeout(e)) return 'SOURCE_NETWORK'
+	if (/SOURCE_CLOUDFLARE|cloudflare/i.test(msg)) return 'SOURCE_CLOUDFLARE'
+	if (/SOURCE_RATE_LIMITED|ResourceExhausted|rate.?limit/i.test(msg)) return 'SOURCE_RATE_LIMITED'
+	if (/SOURCE_NOT_FOUND/i.test(msg)) return 'SOURCE_NOT_FOUND'
+	if (/SOURCE_UNAVAILABLE|code = Unavailable/i.test(msg)) return 'SOURCE_UNAVAILABLE'
+	if (/SOURCE_PARSE|DataLoss/i.test(msg)) return 'SOURCE_PARSE'
+	if (/rpc error|resolveMedia|get details for|input:\d+:/i.test(msg)) return 'INTERNAL'
 	return null
 }
 
@@ -40,12 +69,16 @@ export function sourceErrorInfo(e: unknown): SourceErrorInfo | null {
 	const meta = LABELS[code]
 	return {
 		code,
-		label: meta.label,
-		message: e instanceof Error ? e.message : meta.label,
+		label: isTimeout(e) ? 'Source timed out' : meta.label,
+		message: errorText(e) || meta.label,
 		retriable: meta.retriable,
 		cloudflare: code === 'SOURCE_CLOUDFLARE',
 		expected: meta.expected,
 	}
+}
+
+export function sourceErrorLabel(e: unknown): string {
+	return sourceErrorInfo(e)?.label ?? (errorText(e) || 'Something went wrong')
 }
 
 export function isExpectedSourceNoise(e: unknown): boolean {

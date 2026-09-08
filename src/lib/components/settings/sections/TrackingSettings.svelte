@@ -1,15 +1,17 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { ArrowSquareOut, CheckCircle, CircleNotch, LinkBreak, ArrowClockwise, Copy } from "phosphor-svelte";
+  import { ArrowSquareOut, CheckCircle, CircleNotch, LinkBreak, ArrowClockwise, Copy, TrayArrowDown } from "phosphor-svelte";
   import { platformService } from "$lib/platform-service";
   import { addToast } from "$lib/state/notifications.svelte";
   import { trackerState } from "$lib/state/trackers.svelte";
   import { tsunagu } from "$lib/server-adapters/tsunagu";
   import TrackerLogo from "$lib/components/tracking/TrackerLogo.svelte";
+  import TrackerImportModal from "$lib/components/tracking/TrackerImportModal.svelte";
 
   let drafts  = $state<Record<string, string>>({});
   let busy    = $state<Record<string, boolean>>({});
   let polling = $state<Record<string, boolean>>({});
+  let importKey = $state<string | null>(null);
 
   let alive = true;
   onMount(() => { trackerState.load(); });
@@ -123,6 +125,11 @@
 
             {:else if t.isLoggedIn}
               <div class="trk-actions">
+                {#if t.key === "anilist"}
+                  <button class="s-btn s-btn-accent" onclick={() => (importKey = t.key)}>
+                    <TrayArrowDown size={12} weight="light" /> Import from {t.name}
+                  </button>
+                {/if}
                 <button class="s-btn s-btn-danger" disabled={busy[t.key]} onclick={() => disconnect(t.key)}>
                   <LinkBreak size={12} weight="light" /> Disconnect
                 </button>
@@ -168,6 +175,17 @@
   </div>
 </div>
 
+{#if importKey}
+  {@const t = trackerState.byKey(importKey)}
+  <TrackerImportModal
+    trackerKey={importKey}
+    trackerName={t?.name ?? "AniList"}
+    username={t?.username ?? null}
+    onClose={() => (importKey = null)}
+    onDone={() => (importKey = null)}
+  />
+{/if}
+
 <style>
   .trk-reload {
     display: flex; align-items: center; justify-content: center;
@@ -204,7 +222,7 @@
 
   .trk-connect { display: flex; flex-direction: column; gap: var(--sp-2); }
   .trk-row     { display: flex; align-items: center; gap: var(--sp-2); }
-  .trk-actions { display: flex; }
+  .trk-actions { display: flex; gap: var(--sp-2); }
   .trk-icon-btn { padding: 5px 10px; }
 
   .s-desc code {
