@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, CircleNotch, ArrowRight, Check, Warning, Sparkle, DownloadSimple, TrayArrowDown, ArrowsClockwise, Pause, Play, Trash, Books } from "phosphor-svelte";
+  import { X, CircleNotch, ArrowRight, Check, Warning, Sparkle, DownloadSimple, TrayArrowDown, ArrowsClockwise, Pause, Play, Trash, Books, FilmSlate } from "phosphor-svelte";
   import { tsunagu } from "$lib/server-adapters/tsunagu";
   import Thumbnail from "$lib/components/shared/manga/Thumbnail.svelte";
   import ExtensionIcon from "$lib/components/extensions/ExtensionIcon.svelte";
@@ -28,14 +28,7 @@
   const MATCH_THRESHOLD = 0.3;
   const GOOD_ENOUGH = 0.55;
 
-  const STATUSES = [
-    { key: "CURRENT", label: "Reading" },
-    { key: "PLANNING", label: "Planning" },
-    { key: "COMPLETED", label: "Completed" },
-    { key: "PAUSED", label: "On hold" },
-    { key: "DROPPED", label: "Dropped" },
-    { key: "REPEATING", label: "Rereading" },
-  ] as const;
+  const STATUS_KEYS = ["CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED", "REPEATING"] as const;
 
   type Phase = "pick-target" | "matching" | "assign" | "importing" | "done";
   type EntryStatus = "pending" | "searching" | "found" | "no-match" | "already" | "skipped" | "imported" | "failed";
@@ -61,6 +54,7 @@
   interface CachePayload {
     v: number;
     trackerKey: string;
+    contentType?: ContentType;
     sourceId: string;
     statuses: string[];
     entries: Array<{
@@ -143,7 +137,8 @@
   }
 
   let phase: Phase = $state("pick-target");
-  let allSources: Source[] = $state([]);
+  let importKind: ContentType = $state("MANGA");
+  let installedSources: Source[] = $state([]);
   let loadingSources = $state(true);
   let targetSource: Source | null = $state(null);
   let selectedLang = $state("all");
@@ -168,6 +163,18 @@
   let importProgress = $state({ done: 0, total: 0, failed: 0 });
   let retryingIds = $state<string[]>([]);
 
+  const isAnime = $derived(importKind === "ANIME");
+  const progressWord = $derived(isAnime ? "ep." : "ch.");
+  const statusChips = $derived(STATUS_KEYS.map(key => ({
+    key,
+    label: key === "CURRENT" ? (isAnime ? "Watching" : "Reading")
+      : key === "REPEATING" ? (isAnime ? "Rewatching" : "Rereading")
+      : key === "PLANNING" ? "Planning"
+      : key === "COMPLETED" ? "Completed"
+      : key === "PAUSED" ? "On hold"
+      : "Dropped",
+  })));
+  const allSources = $derived(installedSources.filter(s => s.contentType === importKind));
   const availableLangs = $derived.by(() => {
     const langs = Array.from(new Set<string>(allSources.map(s => s.lang))).sort();
     const en = langs.indexOf("en");
@@ -209,16 +216,16 @@
     const prevAll = new Set(Object.values(ledger.lastSeen).flat());
     const hasHistory = ledger.lastFetchedAt > 0;
     const out: Record<string, { left: number; neu: number; total: number }> = {};
-    for (const s of STATUSES) {
-      const rows = listSnapshot.filter(e => (e.status || "").toUpperCase() === s.key);
+    for (const s of STATUS_KEYS) {
+      const rows = listSnapshot.filter(e => (e.status || "").toUpperCase() === s);
       const left = rows.filter(e => !pulledSet.has(e.remoteId)).length;
       const neu = hasHistory ? rows.filter(e => !prevAll.has(e.remoteId) && !pulledSet.has(e.remoteId)).length : 0;
-      out[s.key] = { left, neu, total: rows.length };
+      out[s] = { left, neu, total: rows.length };
     }
     return out;
   });
-  const leftoverTotal = $derived(STATUSES.reduce((n, s) => n + (statusCounts[s.key]?.left ?? 0), 0));
-  const newTotal = $derived(STATUSES.reduce((n, s) => n + (statusCounts[s.key]?.neu ?? 0), 0));
+  const leftoverTotal = $derived(STATUS_KEYS.reduce((n, s) => n + (statusCounts[s]?.left ?? 0), 0));
+  const newTotal = $derived(STATUS_KEYS.reduce((n, s) => n + (statusCounts[s]?.neu ?? 0), 0));
   const allMissingSelected = $derived(missingIds.length > 0 && missingIds.every(id => selectedIds.includes(id)));
   const selectedMissing = $derived(selectedIds.filter(id => missingIds.includes(id)).length);
   const assignRows = $derived.by(() => {
@@ -248,10 +255,18 @@
   }
 
   function cacheKey() {
-    return `moku:tracker-import:${trackerKey}`;
+    return `moku:tracker-import:${trackerKey}:${importKind}`;
   }
 
   function ledgerKey() {
+    return `moku:tracker-import-ledger:${trackerKey}:${importKind}`;
+  }
+
+  function legacyCacheKey() {
+    return `moku:tracker-import:${trackerKey}`;
+  }
+
+  function legacyLedgerKey() {
     return `moku:tracker-import-ledger:${trackerKey}`;
   }
 
@@ -292,6 +307,7 @@
     const payload: CachePayload = {
       v: CACHE_VER,
       trackerKey,
+      contentType: importKind,
       sourceId: targetSource?.id ?? "",
       statuses: [...selectedStatuses],
       entries: entries.map(e => ({
@@ -312,14 +328,18 @@
   }
 
   function clearCache() {
-    try { localStorage.removeItem(cacheKey()); } catch { /* ignore */ }
+    try {
+      localStorage.removeItem(cacheKey());
+      if (importKind === "MANGA") localStorage.removeItem(legacyCacheKey());
+    } catch { /* ignore */ }
     draft = null;
   }
 
   function readLedger(): ImportLedger {
     if (typeof localStorage === "undefined") return { ...EMPTY_LEDGER };
     try {
-      const raw = localStorage.getItem(ledgerKey());
+      const raw = localStorage.getItem(ledgerKey())
+        ?? (importKind === "MANGA" ? localStorage.getItem(legacyLedgerKey()) : null);
       if (!raw) return { ...EMPTY_LEDGER };
       const p = JSON.parse(raw) as ImportLedger;
       if (p.v !== LEDGER_VER) return { ...EMPTY_LEDGER };
@@ -371,22 +391,24 @@
   }
 
   async function refreshSnapshot() {
+    const kind = importKind;
     snapshotLoading = true;
     const run = (async () => {
       try {
         const [remote, local] = await Promise.all([
-          tsunagu.trackerLibrary(trackerKey, "MANGA" as ContentType, STATUSES.map(s => s.key)),
-          tsunagu.library("MANGA").catch(() => []),
+          tsunagu.trackerLibrary(trackerKey, kind, [...STATUS_KEYS]),
+          tsunagu.library(kind).catch(() => []),
         ]);
-        if (cancelled) return;
+        if (cancelled || importKind !== kind) return;
         listSnapshot = remote;
         snapshotAt = Date.now();
         pulledIds = local.flatMap(m => (m.trackLinks ?? []).filter(l => l.trackerKey === trackerKey).map(l => l.remoteId));
       } catch {
+        if (cancelled || importKind !== kind) return;
         listSnapshot = [];
         snapshotAt = 0;
       } finally {
-        snapshotLoading = false;
+        if (importKind === kind) snapshotLoading = false;
       }
     })();
     snapshotTask = run;
@@ -394,11 +416,12 @@
   }
 
   async function loadRemoteList(): Promise<{ rows: TrackerLibraryEntry[]; fromCache: boolean }> {
+    const kind = importKind;
     if (snapshotTask) await snapshotTask;
-    if (cancelled) return { rows: [], fromCache: true };
+    if (cancelled || importKind !== kind) return { rows: [], fromCache: true };
     if (snapshotIsFresh()) return { rows: snapshotForStatuses(selectedStatuses), fromCache: true };
-    const remote = await tsunagu.trackerLibrary(trackerKey, "MANGA" as ContentType, selectedStatuses);
-    if (cancelled) return { rows: remote, fromCache: false };
+    const remote = await tsunagu.trackerLibrary(trackerKey, kind, selectedStatuses);
+    if (cancelled || importKind !== kind) return { rows: remote, fromCache: false };
     mergeSnapshot(remote);
     return { rows: remote, fromCache: false };
   }
@@ -406,10 +429,12 @@
   function readCache(): CachePayload | null {
     if (typeof localStorage === "undefined") return null;
     try {
-      const raw = localStorage.getItem(cacheKey());
+      const raw = localStorage.getItem(cacheKey())
+        ?? (importKind === "MANGA" ? localStorage.getItem(legacyCacheKey()) : null);
       if (!raw) return null;
       const p = JSON.parse(raw) as CachePayload;
       if (p.v !== CACHE_VER || p.trackerKey !== trackerKey || !Array.isArray(p.entries) || p.entries.length === 0) return null;
+      if (p.contentType && p.contentType !== importKind) return null;
       return p;
     } catch {
       return null;
@@ -452,7 +477,7 @@
     halt = true;
     cancelled = true;
     persistCache();
-    if (listSnapshot.length) rememberSeen(listSnapshot, STATUSES.map(s => s.key));
+    if (listSnapshot.length) rememberSeen(listSnapshot, [...STATUS_KEYS]);
     persistLedger({ lastStatuses: [...selectedStatuses] });
     onClose();
   }
@@ -460,15 +485,10 @@
   $effect(() => {
     tsunagu.installedExtensions()
       .then(exts => {
-        allSources = exts
-          .filter(e => e.installed && e.contentType === "MANGA")
+        installedSources = exts
+          .filter(e => e.installed && (e.contentType === "MANGA" || e.contentType === "ANIME"))
           .map(toSource);
-        const prefLang = settingsState.settings.preferredExtensionLang ?? "";
-        const langs = new Set(allSources.map(s => s.lang));
-        if (prefLang && langs.has(prefLang) && langs.size > 1) selectedLang = prefLang;
-        draft = readCache();
-        ledger = readLedger();
-        if (!draft && ledger.lastStatuses.length) selectedStatuses = [...ledger.lastStatuses];
+        applyKindChrome();
         void refreshSnapshot();
       })
       .catch(console.error)
@@ -490,6 +510,29 @@
       selectedStatuses = [...selectedStatuses, key];
     }
     persistLedger({ lastStatuses: [...selectedStatuses] });
+  }
+
+  function applyKindChrome() {
+    const prefLang = settingsState.settings.preferredExtensionLang ?? "";
+    const langs = new Set(installedSources.filter(s => s.contentType === importKind).map(s => s.lang));
+    selectedLang = prefLang && langs.has(prefLang) && langs.size > 1 ? prefLang : "all";
+    targetSource = null;
+    massSourceId = "";
+    listSnapshot = [];
+    snapshotAt = 0;
+    pulledIds = [];
+    snapshotTask = null;
+    draft = readCache();
+    ledger = readLedger();
+    selectedStatuses = (!draft && ledger.lastStatuses.length) ? [...ledger.lastStatuses] : ["CURRENT"];
+    if (draft?.statuses.length) selectedStatuses = [...draft.statuses];
+  }
+
+  function setImportKind(kind: ContentType) {
+    if (kind === importKind || phase !== "pick-target") return;
+    importKind = kind;
+    applyKindChrome();
+    void refreshSnapshot();
   }
 
   function scrollLangStrip(dir: -1 | 1) {
@@ -560,7 +603,7 @@
     }
     if (cancelled || halt) return;
 
-    const local = await tsunagu.library("MANGA").catch(() => []);
+    const local = await tsunagu.library(importKind).catch(() => []);
     const alreadyByRemote = new Set(
       local.flatMap(m => (m.trackLinks ?? []).filter(l => l.trackerKey === trackerKey).map(l => l.remoteId)),
     );
@@ -612,7 +655,7 @@
     }
     if (cancelled || halt) return;
 
-    const local = await tsunagu.library("MANGA").catch(() => []);
+    const local = await tsunagu.library(importKind).catch(() => []);
     const alreadyByRemote = new Set(
       local.flatMap(m => (m.trackLinks ?? []).filter(l => l.trackerKey === trackerKey).map(l => l.remoteId)),
     );
@@ -759,7 +802,7 @@
       await tsunagu.createTrackerStub(
         trackerKey,
         entry.remote.remoteId,
-        "MANGA",
+        importKind,
         displayTitle(entry.remote),
         entry.remote.coverUrl,
       );
@@ -886,7 +929,7 @@
     const blob = new Blob([JSON.stringify(rows, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `anilist-import-${trackerKey}-failed.json`;
+    a.download = `anilist-import-${trackerKey}-${importKind}-failed.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -905,7 +948,7 @@
         <div class="source-context-info">
           <span class="modal-eyebrow">Library import</span>
           <span class="modal-title">Import from {trackerName}</span>
-          <span class="modal-sub">Manga only · library without a source, or match titles on one source</span>
+          <span class="modal-sub">Library without a source, or match titles on one source</span>
         </div>
       </div>
       {#if phase !== "importing"}
@@ -920,7 +963,7 @@
           <div class="resume-banner">
             <div class="resume-copy">
               <span class="resume-title">Resume import</span>
-              <span class="resume-sub">{draftSourceName()} · {draft.searchDone} / {draft.searchTotal} searched</span>
+              <span class="resume-sub">{isAnime ? "Anime" : "Manga"} · {draftSourceName()} · {draft.searchDone} / {draft.searchTotal} searched</span>
             </div>
             <button class="back-btn" onclick={clearCache}><Trash size={12} weight="light" /> Discard</button>
             <button class="migrate-btn" onclick={() => void resumeFromDraft()}>
@@ -929,10 +972,17 @@
           </div>
         {/if}
         <div class="phase-label-row">
+          <span class="phase-label">Type</span>
+        </div>
+        <div class="status-chips">
+          <button class="status-chip" class:status-chip-active={importKind === "MANGA"} onclick={() => setImportKind("MANGA")}>Manga</button>
+          <button class="status-chip" class:status-chip-active={importKind === "ANIME"} onclick={() => setImportKind("ANIME")}>Anime</button>
+        </div>
+        <div class="phase-label-row">
           <span class="phase-label">List statuses</span>
         </div>
         <div class="status-chips">
-          {#each STATUSES as s}
+          {#each statusChips as s}
             <button
               class="status-chip"
               class:status-chip-active={selectedStatuses.includes(s.key)}
@@ -960,7 +1010,7 @@
         {/if}
         <p class="rate-note">
           <Warning size={12} weight="bold" />
-          AniList rate-limits bulk imports. Matching on a source is slower. Skip MangaDex for a full list.
+          AniList rate-limits bulk imports. Matching on a source is slower.{importKind === "MANGA" ? " Skip MangaDex for a full list." : ""}
         </p>
 
         <div class="phase-label-row">
@@ -969,7 +1019,11 @@
         <div class="source-list source-list-tight">
           <button class="source-row source-row-library" onclick={() => void startStubImport()}>
             <div class="source-icon-wrap logo">
-              <Books size={18} weight="light" />
+              {#if isAnime}
+                <FilmSlate size={18} weight="light" />
+              {:else}
+                <Books size={18} weight="light" />
+              {/if}
             </div>
             <div class="source-info">
               <span class="source-name">Library only · no source</span>
@@ -985,7 +1039,7 @@
         {#if loadingSources}
           <div class="centered"><CircleNotch size={16} weight="light" class="anim-spin" style="color:var(--text-faint)" /></div>
         {:else if allSources.length === 0}
-          <div class="centered"><span class="hint">Install a manga source to match covers and chapters.</span></div>
+          <div class="centered"><span class="hint">Install {isAnime ? "an anime" : "a manga"} source to match titles.</span></div>
         {:else}
           {#if hasMultipleLangs}
             <div class="src-lang-bar">
@@ -1035,7 +1089,11 @@
             {:else if stubImport}
               <div class="review-source">
                 <div class="source-icon-wrap small logo">
-                  <Books size={12} weight="light" />
+                  {#if isAnime}
+                    <FilmSlate size={12} weight="light" />
+                  {:else}
+                    <Books size={12} weight="light" />
+                  {/if}
                 </div>
                 <span class="review-source-name">Library only</span>
               </div>
@@ -1090,10 +1148,10 @@
                     <Sparkle size={9} weight="fill" style="color:var(--accent-fg);flex-shrink:0" />
                     {entry.match.title}
                     <span class="entry-sim">{Math.round(entry.similarity * 100)}%</span>
-                    <span class="entry-prog">ch. {entry.remote.progress}</span>
+                    <span class="entry-prog">{progressWord} {entry.remote.progress}</span>
                   </span>
                 {:else if entry.status === "found"}
-                  <span class="entry-match">Library stub · ch. {entry.remote.progress}</span>
+                  <span class="entry-match">Library stub · {progressWord} {entry.remote.progress}</span>
                 {:else if entry.status === "no-match"}
                   <span class="entry-no-match">No match found</span>
                 {:else if entry.status === "already"}
@@ -1107,7 +1165,7 @@
                 {:else if entry.status === "failed"}
                   <span class="entry-fail">{entry.error ?? "Failed"}</span>
                 {:else if !displaySub(entry.remote)}
-                  <span class="entry-searching">{entry.remote.status} · ch. {entry.remote.progress}</span>
+                  <span class="entry-searching">{entry.remote.status} · {progressWord} {entry.remote.progress}</span>
                 {/if}
               </div>
               <div class="entry-status">
@@ -1178,7 +1236,7 @@
               <tr>
                 <th class="col-check"></th>
                 <th class="col-title">Title</th>
-                <th class="col-prog">Ch.</th>
+                <th class="col-prog">{isAnime ? "Ep." : "Ch."}</th>
                 {#if !stubImport}<th class="col-src">Source</th>{/if}
                 <th class="col-stat">{stubImport ? "Status" : "Match"}</th>
               </tr>
