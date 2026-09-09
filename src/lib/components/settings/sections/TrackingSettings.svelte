@@ -6,12 +6,13 @@
   import { trackerState } from "$lib/state/trackers.svelte";
   import { tsunagu } from "$lib/server-adapters/tsunagu";
   import TrackerLogo from "$lib/components/tracking/TrackerLogo.svelte";
-  import TrackerImportModal from "$lib/components/tracking/TrackerImportModal.svelte";
+
+  interface Props { importKey?: string | null }
+  let { importKey = $bindable(null) }: Props = $props();
 
   let drafts  = $state<Record<string, string>>({});
   let busy    = $state<Record<string, boolean>>({});
   let polling = $state<Record<string, boolean>>({});
-  let importKey = $state<string | null>(null);
 
   let alive = true;
   onMount(() => { trackerState.load(); });
@@ -174,17 +175,6 @@
     </div>
   </div>
 </div>
-
-{#if importKey}
-  {@const t = trackerState.byKey(importKey)}
-  <TrackerImportModal
-    trackerKey={importKey}
-    trackerName={t?.name ?? "AniList"}
-    username={t?.username ?? null}
-    onClose={() => (importKey = null)}
-    onDone={() => (importKey = null)}
-  />
-{/if}
 
 <style>
   .trk-reload {

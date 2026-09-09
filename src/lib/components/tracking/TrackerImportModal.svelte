@@ -143,6 +143,7 @@
   let targetSource: Source | null = $state(null);
   let selectedLang = $state("all");
   let langStripEl: HTMLDivElement | undefined = $state();
+  let langStripOverflow = $state(false);
   let selectedStatuses = $state<string[]>(["CURRENT"]);
   let dryRun = $state(false);
   let stubImport = $state(false);
@@ -182,6 +183,22 @@
     return langs;
   });
   const hasMultipleLangs = $derived(availableLangs.length > 1);
+
+  $effect(() => {
+    const el = langStripEl;
+    void availableLangs.length;
+    if (!el) {
+      langStripOverflow = false;
+      return;
+    }
+    const measure = () => {
+      langStripOverflow = el.scrollWidth > el.clientWidth + 1;
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
   const visibleSources = $derived.by(() => {
     if (selectedLang !== "all") return allSources.filter(s => s.lang === selectedLang);
     const map = new Map<string, Source>();
@@ -948,7 +965,10 @@
         <div class="source-context-info">
           <span class="modal-eyebrow">Library import</span>
           <span class="modal-title">Import from {trackerName}</span>
-          <span class="modal-sub">Library without a source, or match titles on one source</span>
+          <span class="modal-sub">
+            <Warning size={12} weight="bold" />
+            AniList rate-limits bulk imports, so matching on a source will be slower
+          </span>
         </div>
       </div>
       {#if phase !== "importing"}
@@ -959,117 +979,123 @@
     <div class="body">
 
       {#if phase === "pick-target"}
-        {#if draft}
-          <div class="resume-banner">
-            <div class="resume-copy">
-              <span class="resume-title">Resume import</span>
-              <span class="resume-sub">{isAnime ? "Anime" : "Manga"} · {draftSourceName()} · {draft.searchDone} / {draft.searchTotal} searched</span>
-            </div>
-            <button class="back-btn" onclick={clearCache}><Trash size={12} weight="light" /> Discard</button>
-            <button class="migrate-btn" onclick={() => void resumeFromDraft()}>
-              <Play size={12} weight="bold" /> Resume
-            </button>
-          </div>
-        {/if}
-        <div class="phase-label-row">
-          <span class="phase-label">Type</span>
-        </div>
-        <div class="status-chips">
-          <button class="status-chip" class:status-chip-active={importKind === "MANGA"} onclick={() => setImportKind("MANGA")}>Manga</button>
-          <button class="status-chip" class:status-chip-active={importKind === "ANIME"} onclick={() => setImportKind("ANIME")}>Anime</button>
-        </div>
-        <div class="phase-label-row">
-          <span class="phase-label">List statuses</span>
-        </div>
-        <div class="status-chips">
-          {#each statusChips as s}
-            <button
-              class="status-chip"
-              class:status-chip-active={selectedStatuses.includes(s.key)}
-              onclick={() => toggleStatus(s.key)}
-            >
-              {s.label}
-              {#if statusCounts[s.key]?.neu}
-                <span class="chip-badge chip-badge-new">{statusCounts[s.key].left} · {statusCounts[s.key].neu} new</span>
-              {:else if statusCounts[s.key]?.left}
-                <span class="chip-badge">{statusCounts[s.key].left}</span>
-              {/if}
-            </button>
-          {/each}
-        </div>
-        {#if snapshotLoading}
-          <p class="list-hint">Checking AniList lists…</p>
-        {:else if listSnapshot.length > 0}
-          <p class="list-hint">
-            {leftoverTotal} not in library
-            {#if newTotal > 0} · {newTotal} new on AniList{/if}
-            {#if ledger.lastFetchedAt}
-              · last sync {new Date(ledger.lastFetchedAt).toLocaleDateString()}
-            {/if}
-          </p>
-        {/if}
-        <p class="rate-note">
-          <Warning size={12} weight="bold" />
-          AniList rate-limits bulk imports. Matching on a source is slower.{importKind === "MANGA" ? " Skip MangaDex for a full list." : ""}
-        </p>
-
-        <div class="phase-label-row">
-          <span class="phase-label">Import into library</span>
-        </div>
-        <div class="source-list source-list-tight">
-          <button class="source-row source-row-library" onclick={() => void startStubImport()}>
-            <div class="source-icon-wrap logo">
-              {#if isAnime}
-                <FilmSlate size={18} weight="light" />
-              {:else}
-                <Books size={18} weight="light" />
-              {/if}
-            </div>
-            <div class="source-info">
-              <span class="source-name">Library only · no source</span>
-              <span class="source-meta">Titles and AniList tracking. Assign a source later.</span>
-            </div>
-            <ArrowRight size={13} weight="light" class="source-arrow" />
-          </button>
-        </div>
-
-        <div class="phase-label-row">
-          <span class="phase-label">Or match on a source</span>
-        </div>
-        {#if loadingSources}
-          <div class="centered"><CircleNotch size={16} weight="light" class="anim-spin" style="color:var(--text-faint)" /></div>
-        {:else if allSources.length === 0}
-          <div class="centered"><span class="hint">Install {isAnime ? "an anime" : "a manga"} source to match titles.</span></div>
-        {:else}
-          {#if hasMultipleLangs}
-            <div class="src-lang-bar">
-              <button class="src-lang-nav" onclick={() => scrollLangStrip(-1)}>‹</button>
-              <div class="src-lang-chips" bind:this={langStripEl}>
-                <button class="src-lang-chip" class:src-lang-chip-active={selectedLang === "all"} onclick={() => selectedLang = "all"}>All</button>
-                {#each availableLangs as lang}
-                  <button class="src-lang-chip" class:src-lang-chip-active={selectedLang === lang} onclick={() => selectedLang = lang}>
-                    {lang.toUpperCase()}
-                  </button>
-                {/each}
+        <div class="pick">
+          {#if draft}
+            <div class="resume-banner">
+              <div class="resume-copy">
+                <span class="resume-title">Resume import</span>
+                <span class="resume-sub">{isAnime ? "Anime" : "Manga"} · {draftSourceName()} · {draft.searchDone} / {draft.searchTotal} searched</span>
               </div>
-              <button class="src-lang-nav" onclick={() => scrollLangStrip(1)}>›</button>
+              <button class="back-btn" onclick={clearCache}><Trash size={12} weight="light" /> Discard</button>
+              <button class="migrate-btn" onclick={() => void resumeFromDraft()}>
+                <Play size={12} weight="bold" /> Resume
+              </button>
             </div>
           {/if}
-          <div class="source-list">
-            {#each visibleSources as src}
-              <button class="source-row" onclick={() => startSearch(src)}>
-                <div class="source-icon-wrap">
-                  <ExtensionIcon src={src.iconUrl} alt={src.name} class="source-icon" size={36} />
+          <div class="pick-chrome">
+            <div class="phase-label-row">
+              <span class="phase-label">Type</span>
+            </div>
+            <div class="status-chips">
+              <button class="status-chip" class:status-chip-active={importKind === "MANGA"} onclick={() => setImportKind("MANGA")}>Manga</button>
+              <button class="status-chip" class:status-chip-active={importKind === "ANIME"} onclick={() => setImportKind("ANIME")}>Anime</button>
+            </div>
+            <div class="phase-label-row">
+              <span class="phase-label">List statuses</span>
+            </div>
+            <div class="status-chips">
+              {#each statusChips as s}
+                <button
+                  class="status-chip"
+                  class:status-chip-active={selectedStatuses.includes(s.key)}
+                  onclick={() => toggleStatus(s.key)}
+                >
+                  {s.label}
+                  {#if statusCounts[s.key]?.neu}
+                    <span class="chip-badge chip-badge-new">{statusCounts[s.key].left} · {statusCounts[s.key].neu} new</span>
+                  {:else if statusCounts[s.key]?.left}
+                    <span class="chip-badge">{statusCounts[s.key].left}</span>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+            {#if snapshotLoading}
+              <p class="list-hint">Checking AniList lists…</p>
+            {:else if listSnapshot.length > 0}
+              <p class="list-hint">
+                {leftoverTotal} not in library
+                {#if newTotal > 0} · {newTotal} new on AniList{/if}
+                {#if ledger.lastFetchedAt}
+                  · last sync {new Date(ledger.lastFetchedAt).toLocaleDateString()}
+                {/if}
+              </p>
+            {/if}
+
+            <div class="phase-label-row">
+              <span class="phase-label">Import into library</span>
+            </div>
+            <div class="source-list source-list-tight">
+              <button class="source-row source-row-library" onclick={() => void startStubImport()}>
+                <div class="source-icon-wrap logo">
+                  {#if isAnime}
+                    <FilmSlate size={18} weight="light" />
+                  {:else}
+                    <Books size={18} weight="light" />
+                  {/if}
                 </div>
                 <div class="source-info">
-                  <span class="source-name">{src.displayName}</span>
-                  <span class="source-meta">{src.lang.toUpperCase()}{src.isNsfw ? " · NSFW" : ""}</span>
+                  <span class="source-name">Library only · no source</span>
+                  <span class="source-meta">Titles and AniList trackin (assign a source later)</span>
                 </div>
                 <ArrowRight size={13} weight="light" class="source-arrow" />
               </button>
-            {/each}
+            </div>
           </div>
-        {/if}
+
+          <div class="pick-sources">
+            <div class="phase-label-row">
+              <span class="phase-label">Or match on a source</span>
+            </div>
+            {#if loadingSources}
+              <div class="centered"><CircleNotch size={16} weight="light" class="anim-spin" style="color:var(--text-faint)" /></div>
+            {:else if allSources.length === 0}
+              <div class="centered"><span class="hint">Install {isAnime ? "an anime" : "a manga"} source to match titles.</span></div>
+            {:else}
+              {#if hasMultipleLangs}
+                <div class="src-lang-bar">
+                  {#if langStripOverflow}
+                    <button class="src-lang-nav" onclick={() => scrollLangStrip(-1)}>‹</button>
+                  {/if}
+                  <div class="src-lang-chips" bind:this={langStripEl}>
+                    <button class="src-lang-chip" class:src-lang-chip-active={selectedLang === "all"} onclick={() => selectedLang = "all"}>All</button>
+                    {#each availableLangs as lang}
+                      <button class="src-lang-chip" class:src-lang-chip-active={selectedLang === lang} onclick={() => selectedLang = lang}>
+                        {lang.toUpperCase()}
+                      </button>
+                    {/each}
+                  </div>
+                  {#if langStripOverflow}
+                    <button class="src-lang-nav" onclick={() => scrollLangStrip(1)}>›</button>
+                  {/if}
+                </div>
+              {/if}
+              <div class="source-list">
+                {#each visibleSources as src}
+                  <button class="source-row" onclick={() => startSearch(src)}>
+                    <div class="source-icon-wrap">
+                      <ExtensionIcon src={src.iconUrl} alt={src.name} class="source-icon" size={36} />
+                    </div>
+                    <div class="source-info">
+                      <span class="source-name">{src.displayName}</span>
+                      <span class="source-meta">{src.lang.toUpperCase()}{src.isNsfw ? " · NSFW" : ""}</span>
+                    </div>
+                    <ArrowRight size={13} weight="light" class="source-arrow" />
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
 
       {:else if phase === "matching" || phase === "importing"}
         <div class="review-header">
@@ -1383,8 +1409,8 @@
 </div>
 
 <style>
-  .overlay { position: fixed; inset: 0; padding: 24px; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: calc(var(--z-settings) + 2); animation: fadeIn 0.1s ease both; overflow: hidden; }
-  .modal { background: var(--bg-base); border: 1px solid var(--border-base); border-radius: var(--radius-xl); width: 560px; max-height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+  .overlay { position: fixed; inset: 0; padding: 24px; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: calc(var(--z-settings) + 2); animation: fadeIn 0.1s ease both; }
+  .modal { background: var(--bg-base); border: 1px solid var(--border-base); border-radius: var(--radius-xl); width: 560px; max-height: calc(100vh - 48px); min-height: 0; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
   .modal-wide { width: min(860px, 100%); }
   .modal-fill { align-self: stretch; }
 
@@ -1397,15 +1423,24 @@
   .source-context-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .modal-eyebrow { font-family: var(--font-ui); font-size: var(--text-2xs); color: var(--text-faint); letter-spacing: var(--tracking-wider); text-transform: uppercase; }
   .modal-title { font-size: var(--text-base); font-weight: var(--weight-medium); color: var(--text-primary); letter-spacing: var(--tracking-tight); }
-  .modal-sub { font-family: var(--font-ui); font-size: var(--text-2xs); color: var(--text-faint); letter-spacing: var(--tracking-wide); }
+  .modal-sub {
+    display: flex; align-items: flex-start; gap: 6px;
+    font-family: var(--font-ui); font-size: var(--text-2xs); color: var(--text-muted);
+    letter-spacing: var(--tracking-wide); line-height: 1.4;
+  }
+  .modal-sub :global(svg) { flex-shrink: 0; margin-top: 1px; color: var(--text-faint); }
   .close-btn { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: var(--radius-md); color: var(--text-faint); background: none; border: none; cursor: pointer; transition: color var(--t-base), background var(--t-base); flex-shrink: 0; margin-top: 2px; }
   .close-btn:hover { color: var(--text-muted); background: var(--bg-raised); }
 
   .body { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
 
+  .pick { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; --source-row-h: calc(36px + 16px); }
+  .pick-chrome { flex: 0 0 auto; }
+  .pick-sources { flex: 1 1 auto; min-height: calc(4 * var(--source-row-h)); display: flex; flex-direction: column; }
+
   .phase-label-row { padding: var(--sp-3) var(--sp-4) var(--sp-2); flex-shrink: 0; }
   .phase-label { font-family: var(--font-ui); font-size: var(--text-2xs); color: var(--text-faint); letter-spacing: var(--tracking-widest); text-transform: uppercase; }
-  .centered { flex: 1; display: flex; align-items: center; justify-content: center; padding: var(--sp-8); }
+  .centered { flex: 1; min-height: calc(4 * var(--source-row-h)); display: flex; align-items: center; justify-content: center; padding: var(--sp-8); }
   .hint { font-family: var(--font-ui); font-size: var(--text-xs); color: var(--text-faint); letter-spacing: var(--tracking-wide); }
 
   .status-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: 0 var(--sp-4) var(--sp-2); flex-shrink: 0; }
@@ -1415,13 +1450,6 @@
   .chip-badge { font-size: 9px; letter-spacing: var(--tracking-wide); padding: 0 5px; border-radius: var(--radius-sm); border: 1px solid var(--border-dim); color: var(--text-faint); }
   .chip-badge-new { color: var(--accent-fg); border-color: var(--accent-dim); background: var(--accent-muted); }
   .list-hint { margin: 0; padding: 0 var(--sp-4) var(--sp-2); font-family: var(--font-ui); font-size: var(--text-2xs); color: var(--text-faint); letter-spacing: var(--tracking-wide); }
-  .rate-note {
-    margin: 0; padding: 0 var(--sp-4) var(--sp-3);
-    display: flex; align-items: flex-start; gap: 6px;
-    font-family: var(--font-ui); font-size: var(--text-2xs); color: var(--text-muted); letter-spacing: var(--tracking-wide);
-    line-height: 1.4;
-  }
-  .rate-note :global(svg) { flex-shrink: 0; margin-top: 1px; color: var(--text-faint); }
 
   .src-lang-bar { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-2); border-bottom: 1px solid var(--border-dim); flex-shrink: 0; }
   .src-lang-nav { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex-shrink: 0; border-radius: var(--radius-sm); border: 1px solid var(--border-dim); background: none; color: var(--text-faint); font-size: 15px; line-height: 1; cursor: pointer; transition: color var(--t-base), background var(--t-base); }
@@ -1432,8 +1460,8 @@
   .src-lang-chip:hover { color: var(--text-muted); background: var(--bg-raised); }
   .src-lang-chip-active { color: var(--accent-fg); border-color: var(--accent-dim); background: var(--accent-muted); }
 
-  .source-list { flex: 1; overflow-y: auto; padding: var(--sp-2); display: flex; flex-direction: column; gap: 1px; }
-  .source-list-tight { flex: 0 0 auto; padding-bottom: 0; }
+  .source-list { flex: 1; min-height: calc(4 * var(--source-row-h)); overflow-y: auto; padding: var(--sp-2); display: flex; flex-direction: column; gap: 1px; }
+  .source-list-tight { flex: 0 0 auto; min-height: 0; padding-bottom: 0; }
   .source-row { display: flex; align-items: center; gap: var(--sp-3); padding: 8px var(--sp-3); border-radius: var(--radius-md); border: 1px solid transparent; background: none; text-align: left; width: 100%; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
   .source-row:hover { background: var(--bg-raised); border-color: var(--border-dim); }
   .source-row-library { border-color: var(--border-dim); }
@@ -1454,7 +1482,14 @@
   .stop-btn { display: flex; align-items: center; gap: 4px; font-family: var(--font-ui); font-size: var(--text-2xs); letter-spacing: var(--tracking-wide); padding: 3px 8px; border-radius: var(--radius-sm); background: none; color: var(--text-muted); border: 1px solid var(--border-dim); cursor: pointer; flex-shrink: 0; }
   .stop-btn:hover { color: var(--color-error); border-color: var(--color-error); background: var(--bg-raised); }
 
-  .resume-banner { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-3) var(--sp-4) 0; padding: var(--sp-3); border: 1px solid var(--accent-dim); background: var(--accent-muted); border-radius: var(--radius-md); flex-shrink: 0; }
+  .resume-banner {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; align-items: center; gap: var(--sp-2);
+    margin: 0; padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--accent-dim);
+    background: var(--accent-muted);
+    flex-shrink: 0;
+  }
   .resume-copy { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .resume-title { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary); }
   .resume-sub { font-family: var(--font-ui); font-size: var(--text-2xs); color: var(--text-faint); letter-spacing: var(--tracking-wide); }
