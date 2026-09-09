@@ -108,6 +108,25 @@ export const trackers = {
 		return data.trackerLogout
 	},
 
+	async createTrackerStub(
+		trackerKey: string,
+		remoteId: string,
+		contentType: ContentType,
+		title: string,
+		coverUrl?: string | null,
+	): Promise<{ id: string }> {
+		const data = await gql<{ createTrackerStub: { id: string } }>(
+			`mutation CreateTrackerStub($trackerKey: String!, $remoteId: String!, $contentType: ContentType!, $title: String!, $coverUrl: String) {
+				createTrackerStub(trackerKey: $trackerKey, remoteId: $remoteId, contentType: $contentType, title: $title, coverUrl: $coverUrl) {
+					id
+				}
+			}`,
+			{ trackerKey, remoteId, contentType, title, coverUrl: coverUrl || null },
+			baseUrl(),
+		)
+		return data.createTrackerStub
+	},
+
 	async bindTrack(mediaId: string, trackerKey: string, remoteId: string): Promise<TrackLink> {
 		const data = await gql<{ bindTrack: TrackLink }>(
 			`mutation BindTrack($mediaId: ID!, $trackerKey: String!, $remoteId: String!) {

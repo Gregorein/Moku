@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, CircleNotch, ArrowRight, Check, Warning, Sparkle, DownloadSimple, TrayArrowDown, ArrowsClockwise, Pause, Play, Trash } from "phosphor-svelte";
+  import { X, CircleNotch, ArrowRight, Check, Warning, Sparkle, DownloadSimple, TrayArrowDown, ArrowsClockwise, Pause, Play, Trash, Books } from "phosphor-svelte";
   import { tsunagu } from "$lib/server-adapters/tsunagu";
   import Thumbnail from "$lib/components/shared/manga/Thumbnail.svelte";
   import ExtensionIcon from "$lib/components/extensions/ExtensionIcon.svelte";
@@ -24,6 +24,7 @@
   const SEARCH_GAP_MS = 2000;
   const SEARCH_QUERY_GAP_MS = 500;
   const ANILIST_GAP_MS = 1200;
+  const SNAPSHOT_TTL_MS = 15 * 60 * 1000;
   const MATCH_THRESHOLD = 0.3;
   const GOOD_ENOUGH = 0.55;
 
@@ -149,6 +150,7 @@
   let langStripEl: HTMLDivElement | undefined = $state();
   let selectedStatuses = $state<string[]>(["CURRENT"]);
   let dryRun = $state(false);
+  let stubImport = $state(false);
   let cancelled = false;
   let halt = false;
   let massSourceId = $state("");
@@ -157,6 +159,8 @@
   let ledger: ImportLedger = $state({ ...EMPTY_LEDGER });
   let listSnapshot: TrackerLibraryEntry[] = $state([]);
   let snapshotLoading = $state(false);
+  let snapshotAt = 0;
+  let snapshotTask: Promise<void> | null = null;
   let pulledIds: string[] = $state([]);
 
   let entries: EntryResult[] = $state([]);
@@ -350,21 +354,53 @@
     return new Set(Object.values(ledger.lastSeen).flat());
   }
 
+  function snapshotIsFresh(): boolean {
+    return snapshotAt > 0 && Date.now() - snapshotAt < SNAPSHOT_TTL_MS;
+  }
+
+  function snapshotForStatuses(statuses: string[]): TrackerLibraryEntry[] {
+    const wanted = new Set(statuses.map(s => s.toUpperCase()));
+    return listSnapshot.filter(e => wanted.has((e.status || "").toUpperCase()));
+  }
+
+  function mergeSnapshot(rows: TrackerLibraryEntry[]) {
+    const byId = new Map(listSnapshot.map(e => [e.remoteId, e]));
+    for (const r of rows) byId.set(r.remoteId, r);
+    listSnapshot = [...byId.values()];
+    snapshotAt = Date.now();
+  }
+
   async function refreshSnapshot() {
     snapshotLoading = true;
-    try {
-      const [remote, local] = await Promise.all([
-        tsunagu.trackerLibrary(trackerKey, "MANGA" as ContentType, STATUSES.map(s => s.key)),
-        tsunagu.library("MANGA").catch(() => []),
-      ]);
-      if (cancelled) return;
-      listSnapshot = remote;
-      pulledIds = local.flatMap(m => (m.trackLinks ?? []).filter(l => l.trackerKey === trackerKey).map(l => l.remoteId));
-    } catch {
-      listSnapshot = [];
-    } finally {
-      snapshotLoading = false;
-    }
+    const run = (async () => {
+      try {
+        const [remote, local] = await Promise.all([
+          tsunagu.trackerLibrary(trackerKey, "MANGA" as ContentType, STATUSES.map(s => s.key)),
+          tsunagu.library("MANGA").catch(() => []),
+        ]);
+        if (cancelled) return;
+        listSnapshot = remote;
+        snapshotAt = Date.now();
+        pulledIds = local.flatMap(m => (m.trackLinks ?? []).filter(l => l.trackerKey === trackerKey).map(l => l.remoteId));
+      } catch {
+        listSnapshot = [];
+        snapshotAt = 0;
+      } finally {
+        snapshotLoading = false;
+      }
+    })();
+    snapshotTask = run;
+    await run;
+  }
+
+  async function loadRemoteList(): Promise<{ rows: TrackerLibraryEntry[]; fromCache: boolean }> {
+    if (snapshotTask) await snapshotTask;
+    if (cancelled) return { rows: [], fromCache: true };
+    if (snapshotIsFresh()) return { rows: snapshotForStatuses(selectedStatuses), fromCache: true };
+    const remote = await tsunagu.trackerLibrary(trackerKey, "MANGA" as ContentType, selectedStatuses);
+    if (cancelled) return { rows: remote, fromCache: false };
+    mergeSnapshot(remote);
+    return { rows: remote, fromCache: false };
   }
 
   function readCache(): CachePayload | null {
@@ -398,6 +434,7 @@
 
   function draftSourceName(): string {
     if (!draft) return "";
+    if (!draft.sourceId) return "Library only";
     return allSources.find(s => s.id === draft!.sourceId)?.displayName ?? "source";
   }
 
@@ -502,6 +539,7 @@
 
   async function startSearch(target: Source) {
     halt = false;
+    stubImport = false;
     targetSource = target;
     massSourceId = target.id;
     selectedIds = [];
@@ -510,8 +548,11 @@
     searchProgress = { done: 0, total: 0 };
 
     let remote: TrackerLibraryEntry[];
+    let fromCache = false;
     try {
-      remote = await tsunagu.trackerLibrary(trackerKey, "MANGA" as ContentType, selectedStatuses);
+      const loaded = await loadRemoteList();
+      remote = loaded.rows;
+      fromCache = loaded.fromCache;
     } catch (e: any) {
       phase = "pick-target";
       addToast({ kind: "error", title: "Couldn't fetch AniList list", body: e?.message ?? String(e) });
@@ -543,22 +584,80 @@
       return 0;
     });
     searchProgress = { done: 0, total: entries.length };
-    rememberSeen(remote, selectedStatuses);
+    if (!fromCache) rememberSeen(remote, selectedStatuses);
     persistCache();
     await continueMatching();
+  }
+
+  async function startStubImport() {
+    halt = false;
+    stubImport = true;
+    targetSource = null;
+    massSourceId = "";
+    selectedIds = [];
+    phase = "matching";
+    entries = [];
+    searchProgress = { done: 0, total: 0 };
+
+    let remote: TrackerLibraryEntry[];
+    let fromCache = false;
+    try {
+      const loaded = await loadRemoteList();
+      remote = loaded.rows;
+      fromCache = loaded.fromCache;
+    } catch (e: any) {
+      phase = "pick-target";
+      addToast({ kind: "error", title: "Couldn't fetch AniList list", body: e?.message ?? String(e) });
+      return;
+    }
+    if (cancelled || halt) return;
+
+    const local = await tsunagu.library("MANGA").catch(() => []);
+    const alreadyByRemote = new Set(
+      local.flatMap(m => (m.trackLinks ?? []).filter(l => l.trackerKey === trackerKey).map(l => l.remoteId)),
+    );
+    pulledIds = [...alreadyByRemote];
+    const seen = previouslySeenIds();
+    const hasHistory = ledger.lastFetchedAt > 0;
+
+    entries = remote.map(r => ({
+      remote: r,
+      match: null,
+      similarity: 1,
+      status: alreadyByRemote.has(r.remoteId) ? "already" : "found",
+      sourceId: null,
+      fresh: hasHistory && !seen.has(r.remoteId) && !alreadyByRemote.has(r.remoteId),
+    }));
+    entries.sort((a, b) => {
+      if (a.status === "already" && b.status !== "already") return 1;
+      if (b.status === "already" && a.status !== "already") return -1;
+      if (a.fresh && !b.fresh) return -1;
+      if (b.fresh && !a.fresh) return 1;
+      return 0;
+    });
+    searchProgress = { done: entries.length, total: entries.length };
+    if (!fromCache) rememberSeen(remote, selectedStatuses);
+    persistCache();
+    if (cancelled || halt) return;
+    if (entries.every(e => e.status === "already")) {
+      phase = "done";
+      return;
+    }
+    phase = "assign";
   }
 
   async function resumeFromDraft() {
     if (!draft) return;
     halt = false;
     cancelled = false;
+    stubImport = !draft.sourceId;
     applyCache(draft);
     selectedIds = [];
-    if (!targetSource) {
+    if (!stubImport && !targetSource) {
       addToast({ kind: "error", title: "Source no longer installed" });
       return;
     }
-    if (pendingCount > 0) {
+    if (!stubImport && pendingCount > 0) {
       await continueMatching();
       return;
     }
@@ -656,17 +755,22 @@
   }
 
   async function importOne(entry: EntryResult) {
+    if (!entry.sourceId) {
+      await tsunagu.createTrackerStub(
+        trackerKey,
+        entry.remote.remoteId,
+        "MANGA",
+        displayTitle(entry.remote),
+        entry.remote.coverUrl,
+      );
+      if (!pulledIds.includes(entry.remote.remoteId)) pulledIds = [...pulledIds, entry.remote.remoteId];
+      return;
+    }
     const src = sourceById(entry.sourceId);
     if (!src) throw new Error("No source for this title");
     if (!entry.match?.sourceEntryId) throw new Error("No match for this title");
     const info = await tsunagu.mangaInfo(src.id, entry.match.sourceEntryId, true);
     if (!info.inLibrary) await tsunagu.setInLibrary(info.id, true);
-    if (trackerKey === "anilist") {
-      try {
-        await tsunagu.applyMetadataMatch(info.id, entry.remote.remoteId, "anilist");
-      } catch { /* metadata is optional; tracking still binds */ }
-      await sleep(ANILIST_GAP_MS);
-    }
     const link = await tsunagu.bindTrack(info.id, trackerKey, entry.remote.remoteId);
     await sleep(ANILIST_GAP_MS);
     await tsunagu.updateTrack(link.id, {
@@ -681,7 +785,7 @@
     const idx = entries.findIndex(e => e.remote.remoteId === remoteId);
     if (idx < 0 || retryingIds.includes(remoteId)) return;
     const entry = entries[idx];
-    if (!entry.match) {
+    if (entry.sourceId && !entry.match) {
       const src = sourceById(entry.sourceId);
       if (src) await searchRow(remoteId, src.id);
       return;
@@ -696,7 +800,6 @@
         await importOne(entry);
         entries[idx] = { ...entries[idx], status: "imported", error: undefined };
         await loadLibrary(true);
-        void refreshSnapshot();
       }
       persistCache();
     } catch (e: unknown) {
@@ -708,7 +811,7 @@
   }
 
   async function startImport() {
-    const toImport = entries.filter(e => e.status === "found" && e.match);
+    const toImport = entries.filter(e => e.status === "found" && (e.match || !e.sourceId));
     if (toImport.length === 0) {
       phase = (noMatchCount > 0 || pendingCount > 0 || failedCount > 0) ? "assign" : "done";
       return;
@@ -739,7 +842,6 @@
 
     if (!dryRun) {
       await loadLibrary(true);
-      void refreshSnapshot();
     }
 
     if (halt) {
@@ -753,7 +855,7 @@
       phase = "assign";
       addToast({
         kind: "success",
-        title: dryRun ? "Dry run complete" : "Imported matched titles",
+        title: dryRun ? "Dry run complete" : stubImport ? "Imported library stubs" : "Imported matched titles",
         body: `${importProgress.done - importProgress.failed} imported, ${noMatchCount + pendingCount} still unmatched`,
       });
       return;
@@ -803,7 +905,7 @@
         <div class="source-context-info">
           <span class="modal-eyebrow">Library import</span>
           <span class="modal-title">Import from {trackerName}</span>
-          <span class="modal-sub">Manga only · match titles on one source, then assign the rest</span>
+          <span class="modal-sub">Manga only · library without a source, or match titles on one source</span>
         </div>
       </div>
       {#if phase !== "importing"}
@@ -858,16 +960,32 @@
         {/if}
         <p class="rate-note">
           <Warning size={12} weight="bold" />
-          AniList and sources rate-limit bulk imports. Wait a few minutes between runs. Skip MangaDex for a full list.
+          AniList rate-limits bulk imports. Matching on a source is slower. Skip MangaDex for a full list.
         </p>
 
         <div class="phase-label-row">
-          <span class="phase-label">Default destination source</span>
+          <span class="phase-label">Import into library</span>
+        </div>
+        <div class="source-list source-list-tight">
+          <button class="source-row source-row-library" onclick={() => void startStubImport()}>
+            <div class="source-icon-wrap logo">
+              <Books size={18} weight="light" />
+            </div>
+            <div class="source-info">
+              <span class="source-name">Library only · no source</span>
+              <span class="source-meta">Titles and AniList tracking. Assign a source later.</span>
+            </div>
+            <ArrowRight size={13} weight="light" class="source-arrow" />
+          </button>
+        </div>
+
+        <div class="phase-label-row">
+          <span class="phase-label">Or match on a source</span>
         </div>
         {#if loadingSources}
           <div class="centered"><CircleNotch size={16} weight="light" class="anim-spin" style="color:var(--text-faint)" /></div>
         {:else if allSources.length === 0}
-          <div class="centered"><span class="hint">Install a manga source first.</span></div>
+          <div class="centered"><span class="hint">Install a manga source to match covers and chapters.</span></div>
         {:else}
           {#if hasMultipleLangs}
             <div class="src-lang-bar">
@@ -913,6 +1031,13 @@
                   <ExtensionIcon src={targetSource.iconUrl} alt={targetSource.name} class="source-icon" size={20} />
                 </div>
                 <span class="review-source-name">{targetSource.displayName}</span>
+              </div>
+            {:else if stubImport}
+              <div class="review-source">
+                <div class="source-icon-wrap small logo">
+                  <Books size={12} weight="light" />
+                </div>
+                <span class="review-source-name">Library only</span>
               </div>
             {/if}
           </div>
@@ -967,6 +1092,8 @@
                     <span class="entry-sim">{Math.round(entry.similarity * 100)}%</span>
                     <span class="entry-prog">ch. {entry.remote.progress}</span>
                   </span>
+                {:else if entry.status === "found"}
+                  <span class="entry-match">Library stub · ch. {entry.remote.progress}</span>
                 {:else if entry.status === "no-match"}
                   <span class="entry-no-match">No match found</span>
                 {:else if entry.status === "already"}
@@ -1011,7 +1138,7 @@
             {#if (foundCount > 0 || missingEntries.length > 0) && alreadyCount > 0}<span class="stat-dot">·</span>{/if}
             {#if alreadyCount > 0}<span class="stat-already">{alreadyCount} already in library</span>{/if}
           </span>
-          {#if assignSources.length > 0}
+          {#if assignSources.length > 0 && !stubImport}
             <label class="assign-default">
               Default
               <select
@@ -1028,6 +1155,7 @@
           {/if}
         </div>
 
+        {#if !stubImport}
         <div class="mass-bar">
           <label class="mass-check">
             <input class="s-check" type="checkbox" checked={allMissingSelected} onchange={toggleAllMissing} />
@@ -1042,6 +1170,7 @@
             Search {selectedMissing}
           </button>
         </div>
+        {/if}
 
         <div class="table-wrap">
           <table class="assign-table">
@@ -1050,8 +1179,8 @@
                 <th class="col-check"></th>
                 <th class="col-title">Title</th>
                 <th class="col-prog">Ch.</th>
-                <th class="col-src">Source</th>
-                <th class="col-stat">Match</th>
+                {#if !stubImport}<th class="col-src">Source</th>{/if}
+                <th class="col-stat">{stubImport ? "Status" : "Match"}</th>
               </tr>
             </thead>
             <tbody>
@@ -1087,6 +1216,7 @@
                       </div>
                     </td>
                     <td class="col-prog">{entry.remote.progress}</td>
+                    {#if !stubImport}
                     <td class="col-src">
                       {#if entry.status === "imported"}
                         {@const src = sourceById(entry.sourceId)}
@@ -1104,6 +1234,7 @@
                         </select>
                       {/if}
                     </td>
+                    {/if}
                     <td class="col-stat">
                       <div class="stat-cell">
                         {#if entry.status === "searching" || retryingIds.includes(entry.remote.remoteId)}
@@ -1112,7 +1243,12 @@
                           <span class="entry-searching">Not searched</span>
                         {:else if entry.status === "found"}
                           <Check size={13} weight="bold" style="color:var(--color-success)" />
-                          <span class="entry-done">Matched</span>
+                          <span class="entry-done">{stubImport ? "Ready" : "Matched"}</span>
+                          {#if stubImport}
+                            <button class="entry-exclude-btn" onclick={() => excludeEntry(idx)} title="Skip this title">
+                              <X size={10} weight="bold" />
+                            </button>
+                          {/if}
                         {:else if entry.status === "imported"}
                           <Check size={13} weight="bold" style="color:var(--color-success)" />
                           <span class="entry-done">Imported</span>
@@ -1151,14 +1287,14 @@
               onclick={() => (dryRun = !dryRun)}
             ><span class="s-toggle-thumb"></span></button>
           </div>
-          {#if pendingCount > 0}
+          {#if pendingCount > 0 && !stubImport}
             <button class="back-btn" onclick={() => void continueMatching()}>
               <Play size={12} weight="bold" /> Resume search
             </button>
           {/if}
           <button class="migrate-btn" onclick={() => void startImport()} disabled={foundCount === 0}>
             <TrayArrowDown size={13} weight="bold" />
-            Import {foundCount} matched
+            Import {foundCount}{stubImport ? "" : " matched"}
           </button>
         </div>
 
@@ -1239,8 +1375,10 @@
   .src-lang-chip-active { color: var(--accent-fg); border-color: var(--accent-dim); background: var(--accent-muted); }
 
   .source-list { flex: 1; overflow-y: auto; padding: var(--sp-2); display: flex; flex-direction: column; gap: 1px; }
+  .source-list-tight { flex: 0 0 auto; padding-bottom: 0; }
   .source-row { display: flex; align-items: center; gap: var(--sp-3); padding: 8px var(--sp-3); border-radius: var(--radius-md); border: 1px solid transparent; background: none; text-align: left; width: 100%; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
   .source-row:hover { background: var(--bg-raised); border-color: var(--border-dim); }
+  .source-row-library { border-color: var(--border-dim); }
   .source-info { flex: 1; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
   .source-name { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .source-meta { font-family: var(--font-ui); font-size: var(--text-2xs); color: var(--text-faint); letter-spacing: var(--tracking-wide); }
