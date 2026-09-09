@@ -21,7 +21,9 @@
   }
   let { trackerKey, trackerName, username = null, onClose, onDone }: Props = $props();
 
-  const SEARCH_GAP_MS = 1000;
+  const SEARCH_GAP_MS = 2000;
+  const SEARCH_QUERY_GAP_MS = 500;
+  const ANILIST_GAP_MS = 1200;
   const MATCH_THRESHOLD = 0.3;
   const GOOD_ENOUGH = 0.55;
 
@@ -238,7 +240,7 @@
   }
 
   function sourceLabel(src: Source): string {
-    return `${src.displayName} (${src.lang.toUpperCase()})`;
+    return src.displayName;
   }
 
   function cacheKey() {
@@ -473,7 +475,10 @@
   async function matchOnSource(source: Source, remote: TrackerLibraryEntry): Promise<Pick<EntryResult, "match" | "similarity" | "status" | "error">> {
     let best: { manga: Manga; similarity: number } | null = null;
     try {
-      for (const q of searchQueries(remote)) {
+      const queries = searchQueries(remote);
+      for (let qi = 0; qi < queries.length; qi++) {
+        const q = queries[qi];
+        if (qi > 0) await sleep(SEARCH_QUERY_GAP_MS);
         const resp = await tsunagu.search(source.id, q, 1);
         for (const r of resp.results) {
           const similarity = scoreHit(remote, r.title);
@@ -660,14 +665,15 @@
       try {
         await tsunagu.applyMetadataMatch(info.id, entry.remote.remoteId, "anilist");
       } catch { /* metadata is optional; tracking still binds */ }
+      await sleep(ANILIST_GAP_MS);
     }
     const link = await tsunagu.bindTrack(info.id, trackerKey, entry.remote.remoteId);
+    await sleep(ANILIST_GAP_MS);
     await tsunagu.updateTrack(link.id, {
       status: alStatusToTrack(entry.remote.status),
       score: entry.remote.score,
       lastChapterRead: entry.remote.progress,
     });
-    await tsunagu.pullTracker(info.id).catch(() => {});
     if (!pulledIds.includes(entry.remote.remoteId)) pulledIds = [...pulledIds, entry.remote.remoteId];
   }
 
@@ -728,6 +734,7 @@
         importProgress = { ...importProgress, done: importProgress.done + 1, failed: importProgress.failed + 1 };
       }
       persistCache();
+      if (!dryRun) await sleep(ANILIST_GAP_MS);
     }
 
     if (!dryRun) {
@@ -849,6 +856,10 @@
             {/if}
           </p>
         {/if}
+        <p class="rate-note">
+          <Warning size={12} weight="bold" />
+          AniList and sources rate-limit bulk imports. Wait a few minutes between runs. Skip MangaDex for a full list.
+        </p>
 
         <div class="phase-label-row">
           <span class="phase-label">Default destination source</span>
@@ -1210,6 +1221,13 @@
   .chip-badge { font-size: 9px; letter-spacing: var(--tracking-wide); padding: 0 5px; border-radius: var(--radius-sm); border: 1px solid var(--border-dim); color: var(--text-faint); }
   .chip-badge-new { color: var(--accent-fg); border-color: var(--accent-dim); background: var(--accent-muted); }
   .list-hint { margin: 0; padding: 0 var(--sp-4) var(--sp-2); font-family: var(--font-ui); font-size: var(--text-2xs); color: var(--text-faint); letter-spacing: var(--tracking-wide); }
+  .rate-note {
+    margin: 0; padding: 0 var(--sp-4) var(--sp-3);
+    display: flex; align-items: flex-start; gap: 6px;
+    font-family: var(--font-ui); font-size: var(--text-2xs); color: var(--text-muted); letter-spacing: var(--tracking-wide);
+    line-height: 1.4;
+  }
+  .rate-note :global(svg) { flex-shrink: 0; margin-top: 1px; color: var(--text-faint); }
 
   .src-lang-bar { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-2); border-bottom: 1px solid var(--border-dim); flex-shrink: 0; }
   .src-lang-nav { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex-shrink: 0; border-radius: var(--radius-sm); border: 1px solid var(--border-dim); background: none; color: var(--text-faint); font-size: 15px; line-height: 1; cursor: pointer; transition: color var(--t-base), background var(--t-base); }
@@ -1282,8 +1300,16 @@
   .mass-search-btn { padding: 5px 12px; }
   .src-select {
     font-family: var(--font-ui); font-size: var(--text-2xs); letter-spacing: var(--tracking-wide);
-    color: var(--text-secondary); background: var(--bg-raised); border: 1px solid var(--border-dim);
-    border-radius: var(--radius-sm); padding: 4px 8px; min-width: 0; max-width: 220px; cursor: pointer;
+    color: var(--text-secondary);
+    background-color: var(--bg-raised);
+    border: 1px solid var(--border-dim);
+    border-radius: var(--radius-sm);
+    padding: 4px 22px 4px 8px;
+    min-width: 0; max-width: 220px; cursor: pointer;
+    appearance: none; -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' stroke='%236e6c68' stroke-width='1.3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
   }
   .src-select:focus { outline: none; border-color: var(--accent-dim); }
   .src-select:disabled { opacity: 0.5; cursor: default; }

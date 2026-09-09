@@ -2,6 +2,7 @@
 @import '$lib/styles/themes.css';
 
 :root {
+  color-scheme: dark;
   --bg-void:      #080808;
   --bg-base:      #0c0c0c;
   --bg-surface:   #101010;

@@ -29,6 +29,7 @@
 }
 
 [data-theme="light"] {
+  color-scheme: light;
   --bg-void:      #d8d4ce;
   --bg-base:      #e2deda;
   --bg-surface:   #ece8e2;
