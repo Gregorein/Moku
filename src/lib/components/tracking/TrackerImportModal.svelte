@@ -979,19 +979,19 @@
     <div class="body">
 
       {#if phase === "pick-target"}
-        <div class="pick">
-          {#if draft}
-            <div class="resume-banner">
-              <div class="resume-copy">
-                <span class="resume-title">Resume import</span>
-                <span class="resume-sub">{isAnime ? "Anime" : "Manga"} · {draftSourceName()} · {draft.searchDone} / {draft.searchTotal} searched</span>
-              </div>
-              <button class="back-btn" onclick={clearCache}><Trash size={12} weight="light" /> Discard</button>
-              <button class="migrate-btn" onclick={() => void resumeFromDraft()}>
-                <Play size={12} weight="bold" /> Resume
-              </button>
+        {#if draft}
+          <div class="resume-banner">
+            <div class="resume-copy">
+              <span class="resume-title">Resume import</span>
+              <span class="resume-sub">{isAnime ? "Anime" : "Manga"} · {draftSourceName()} · {draft.searchDone} / {draft.searchTotal} searched</span>
             </div>
-          {/if}
+            <button class="back-btn" onclick={clearCache}><Trash size={12} weight="light" /> Discard</button>
+            <button class="migrate-btn" onclick={() => void resumeFromDraft()}>
+              <Play size={12} weight="bold" /> Resume
+            </button>
+          </div>
+        {/if}
+        <div class="pick">
           <div class="pick-chrome">
             <div class="phase-label-row">
               <span class="phase-label">Type</span>
@@ -1483,9 +1483,8 @@
   .stop-btn:hover { color: var(--color-error); border-color: var(--color-error); background: var(--bg-raised); }
 
   .resume-banner {
-    position: sticky; top: 0; z-index: 2;
     display: flex; align-items: center; gap: var(--sp-2);
-    margin: 0; padding: var(--sp-3) var(--sp-4);
+    padding: var(--sp-3) var(--sp-4);
     border-bottom: 1px solid var(--accent-dim);
     background: var(--accent-muted);
     flex-shrink: 0;
