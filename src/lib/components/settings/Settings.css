@@ -232,6 +232,39 @@
   background: var(--bg-void);
 }
 
+.s-check {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-overlay);
+  cursor: pointer;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  transition: background var(--t-base), border-color var(--t-base);
+}
+.s-check:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.s-check:checked::after {
+  content: "";
+  width: 6px;
+  height: 3px;
+  margin-bottom: 2px;
+  border-left: 1.5px solid var(--bg-void);
+  border-bottom: 1.5px solid var(--bg-void);
+  transform: rotate(-45deg);
+}
+.s-check:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 
 .s-sync-pair {
   display: grid;

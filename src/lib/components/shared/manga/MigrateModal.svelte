@@ -54,6 +54,7 @@
   let selectedExtension: Extension | null = $state(null);
   let selectedLang                    = $state("all");
   let langStripEl: HTMLDivElement | undefined = $state();
+  let langStripOverflow = $state(false);
 
   const stepIdx        = $derived(STEPS.indexOf(step));
   const availableLangs = $derived.by(() => {
@@ -63,6 +64,22 @@
     return langs;
   });
   const hasMultipleLangs = $derived(availableLangs.length > 1);
+
+  $effect(() => {
+    const el = langStripEl;
+    void availableLangs.length;
+    if (!el) {
+      langStripOverflow = false;
+      return;
+    }
+    const measure = () => {
+      langStripOverflow = el.scrollWidth > el.clientWidth + 1;
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
   const visibleExtensions = $derived.by(() => {
     if (selectedLang !== "all") return extensions.filter(e => e.lang === selectedLang);
     const map = new Map<string, Extension>();
@@ -235,7 +252,9 @@
         {:else}
           {#if hasMultipleLangs}
             <div class="src-lang-bar">
-              <button class="src-lang-nav" onclick={() => scrollLangStrip(-1)}>‹</button>
+              {#if langStripOverflow}
+                <button class="src-lang-nav" onclick={() => scrollLangStrip(-1)}>‹</button>
+              {/if}
               <div class="src-lang-chips" bind:this={langStripEl}>
                 <button class="src-lang-chip" class:src-lang-chip-active={selectedLang === "all"} onclick={() => selectedLang = "all"}>All</button>
                 {#each availableLangs as lang}
@@ -244,7 +263,9 @@
                   </button>
                 {/each}
               </div>
-              <button class="src-lang-nav" onclick={() => scrollLangStrip(1)}>›</button>
+              {#if langStripOverflow}
+                <button class="src-lang-nav" onclick={() => scrollLangStrip(1)}>›</button>
+              {/if}
             </div>
           {/if}
           <div class="source-list">

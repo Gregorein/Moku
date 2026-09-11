@@ -6,6 +6,7 @@
   import { eventToKeybind } from '$lib/core/keybinds/keybindEngine'
   import type { Keybinds } from '$lib/core/keybinds/defaultBinds'
   import { selectPortal } from '$lib/core/ui/selectPortal'
+  import { trackerState } from '$lib/state/trackers.svelte'
 
   import GeneralSettings     from './sections/GeneralSettings.svelte'
   import AppearanceSettings  from './sections/AppearanceSettings.svelte'
@@ -24,6 +25,7 @@
   import ServerSettings      from './sections/ServerSettings.svelte'
   import ModalBlur           from '$lib/components/shared/ui/ModalBlur.svelte'
   import BugReporter         from './BugReporter.svelte'
+  import TrackerImportModal  from '$lib/components/tracking/TrackerImportModal.svelte'
 
   interface Props { onclose?: () => void; onOpenThemeEditor?: (id?: string | null) => void }
   let { onclose, onOpenThemeEditor }: Props = $props()
@@ -55,6 +57,7 @@
   let contentBodyEl: HTMLDivElement
   let modalEl: HTMLDivElement
   let bugReporterOpen    = $state(false)
+  let importKey          = $state<string | null>(null)
 
   $effect(() => { tab; tick().then(() => contentBodyEl?.scrollTo({ top: 0 })) })
 
@@ -78,7 +81,7 @@
   let listeningKey: keyof Keybinds | null = $state(null)
 
   $effect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !listeningKey && !bugReporterOpen) { e.stopPropagation(); close() } }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !listeningKey && !bugReporterOpen && !importKey) { e.stopPropagation(); close() } }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   })
@@ -195,7 +198,7 @@
         {:else if tab === 'automation'}
           <AutomationSettings />
         {:else if tab === 'tracking'}
-          <TrackingSettings />
+          <TrackingSettings bind:importKey />
         {:else if tab === 'performance'}
           <PerformanceSettings />
         {:else if tab === 'keybinds'}
@@ -221,6 +224,17 @@
 
 {#if bugReporterOpen}
   <BugReporter onClose={() => (bugReporterOpen = false)} />
+{/if}
+
+{#if importKey}
+  {@const t = trackerState.byKey(importKey)}
+  <TrackerImportModal
+    trackerKey={importKey}
+    trackerName={t?.name ?? "AniList"}
+    username={t?.username ?? null}
+    onClose={() => (importKey = null)}
+    onDone={() => (importKey = null)}
+  />
 {/if}
 
 <style>

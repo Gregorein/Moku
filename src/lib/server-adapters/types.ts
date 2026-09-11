@@ -247,6 +247,20 @@ export interface TrackSearchResult {
 	mediaType?: string | null
 }
 
+export interface TrackerLibraryEntry {
+	remoteId: string
+	title: string
+	titleRomaji: string | null
+	titleEnglish: string | null
+	status: string
+	progress: number
+	score: number
+	coverUrl: string | null
+	mediaType: string | null
+	url: string | null
+	totalChapters: number | null
+}
+
 export interface TrackLink {
 	id: string
 	mediaId: string

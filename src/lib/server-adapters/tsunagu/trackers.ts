@@ -1,5 +1,5 @@
 import { gql, baseUrl } from './gql'
-import type { Tracker, TrackSearchResult, TrackLink, ContentType } from '$lib/server-adapters/types'
+import type { Tracker, TrackSearchResult, TrackLink, ContentType, TrackerLibraryEntry } from '$lib/server-adapters/types'
 
 const TRACKER_FIELDS = `key name configured isLoggedIn authUrl iconUrl username scoreOptions statusOptions { value name animeName }`
 const LINK_FIELDS = `
@@ -71,6 +71,23 @@ export const trackers = {
 		return data.trackSearch
 	},
 
+	async trackerLibrary(
+		trackerKey: string,
+		contentType: ContentType,
+		statuses?: string[],
+	): Promise<TrackerLibraryEntry[]> {
+		const data = await gql<{ trackerLibrary: TrackerLibraryEntry[] }>(
+			`query TrackerLibrary($trackerKey: String!, $contentType: ContentType!, $statuses: [String!]) {
+				trackerLibrary(trackerKey: $trackerKey, contentType: $contentType, statuses: $statuses) {
+					remoteId title titleRomaji titleEnglish status progress score coverUrl mediaType url totalChapters
+				}
+			}`,
+			{ trackerKey, contentType, statuses: statuses && statuses.length ? statuses : undefined },
+			baseUrl(),
+		)
+		return data.trackerLibrary
+	},
+
 	async trackerLogin(trackerKey: string, token: string): Promise<Tracker> {
 		const data = await gql<{ trackerLogin: Tracker }>(
 			`mutation TrackerLogin($trackerKey: String!, $token: String!) {
@@ -89,6 +106,25 @@ export const trackers = {
 			baseUrl(),
 		)
 		return data.trackerLogout
+	},
+
+	async createTrackerStub(
+		trackerKey: string,
+		remoteId: string,
+		contentType: ContentType,
+		title: string,
+		coverUrl?: string | null,
+	): Promise<{ id: string }> {
+		const data = await gql<{ createTrackerStub: { id: string } }>(
+			`mutation CreateTrackerStub($trackerKey: String!, $remoteId: String!, $contentType: ContentType!, $title: String!, $coverUrl: String) {
+				createTrackerStub(trackerKey: $trackerKey, remoteId: $remoteId, contentType: $contentType, title: $title, coverUrl: $coverUrl) {
+					id
+				}
+			}`,
+			{ trackerKey, remoteId, contentType, title, coverUrl: coverUrl || null },
+			baseUrl(),
+		)
+		return data.createTrackerStub
 	},
 
 	async bindTrack(mediaId: string, trackerKey: string, remoteId: string): Promise<TrackLink> {
