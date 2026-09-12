@@ -3,6 +3,7 @@ import type { Manga } from "$lib/types";
 import type { SearchResult, Extension, FilterNode, FilterInput } from "$lib/server-adapters/types";
 import type { Source } from "$lib/types";
 import { shouldHideNsfw } from "$lib/core/util";
+import { canonicalLang } from "$lib/core/lang";
 
 export { shouldHideNsfw };
 
@@ -280,7 +281,7 @@ export function toSource(e: Extension): Source {
   return {
     id:             e.id,
     name:           e.name,
-    lang:           e.lang,
+    lang:           canonicalLang(e.lang),
     displayName:    e.displayName,
     iconUrl:        e.iconUrl ?? "",
     isNsfw:         e.isNsfw,

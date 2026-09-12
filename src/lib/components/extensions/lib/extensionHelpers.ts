@@ -1,5 +1,6 @@
 import type { Extension } from "$lib/server-adapters/types";
 import type { ContentTypeFilter } from "$lib/types/settings";
+import { canonicalLang, sameLang, LANG_ALL } from "$lib/core/lang";
 
 export type Filter = "installed" | "available" | "updates" | "all";
 export type Panel  = null | "apk" | "repos";
@@ -32,10 +33,12 @@ export function groupExtensions(
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(ext);
   }
+  const pref = canonicalLang(preferredLang);
   return Array.from(map.values()).map((all) => {
     const primary =
-      all.find((v) => v.lang === preferredLang) ??
-      all.find((v) => v.lang === "en") ??
+      (pref !== LANG_ALL ? all.find((v) => sameLang(v.lang, pref)) : undefined) ??
+      all.find((v) => sameLang(v.lang, LANG_ALL)) ??
+      all.find((v) => sameLang(v.lang, "en")) ??
       all[0];
     return { base: baseName(primary.name), primary, variants: all.filter((v) => v.packageName !== primary.packageName) };
   });

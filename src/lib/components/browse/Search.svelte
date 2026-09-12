@@ -7,6 +7,7 @@
   import { setPreviewManga }    from "$lib/state/series.svelte";
   import { toCachedManga, toBrowseManga, toSource, shouldHideNsfw, runConcurrent, type CachedManga, coverFirst } from "$lib/components/browse/lib/searchFilter";
   import type { Manga, Source } from "$lib/types";
+  import { canonicalLang, LANG_ALL } from "$lib/core/lang";
 
   import KeywordTab from "$lib/components/browse/KeywordTab.svelte";
   import TagTab     from "$lib/components/browse/TagTab.svelte";
@@ -67,7 +68,7 @@
       : allSourcesRaw.filter((s) => s.contentType === contentTypeFilter)
   );
 
-  const preferredLang    = $derived(settingsState.settings.preferredExtensionLang ?? "en");
+  const preferredLang    = $derived(canonicalLang(settingsState.settings.preferredExtensionLang ?? LANG_ALL));
   const availableLangs   = $derived(Array.from(new Set<string>(allSources.map((s) => s.lang))).sort());
   const hasMultipleLangs = $derived(availableLangs.length > 1);
 

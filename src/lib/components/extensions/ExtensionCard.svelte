@@ -2,6 +2,7 @@
   import { CircleNotch, CaretRight, CaretDown, Books, ImageSquare, BookOpenText, FilmSlate } from "phosphor-svelte";
   import ExtensionIcon from "$lib/components/extensions/ExtensionIcon.svelte";
   import type { Extension } from "$lib/server-adapters/types";
+  import { langBadge } from "$lib/core/lang";
 
   function contentTypeIcon(ct: Extension["contentType"]) {
     if (ct === "NOVEL") return BookOpenText;
@@ -48,7 +49,7 @@
         <span class="type-tag" title={primary.contentType}>
           <CtIcon size={10} weight="regular" />
         </span>
-        <span class="lang-tag">{primary.lang.toUpperCase()}</span>
+        <span class="lang-tag">{langBadge(primary.lang)}</span>
         {#if primary.installed}
           <span class="lib-badge" class:lib-badge-empty={libraryCount === 0}>
             <Books size={10} weight={libraryCount > 0 ? "fill" : "regular"} />
@@ -87,7 +88,7 @@
     <div class="variants" class:variants-anim={anims}>
       {#each variants as v}
         <div class="variant-row">
-          <span class="lang-tag">{v.lang.toUpperCase()}</span>
+          <span class="lang-tag">{langBadge(v.lang)}</span>
           <span class="variant-name">{v.name}</span>
           <span class="variant-version">v{v.version}</span>
           {#if v.needsUpdate}<span class="update-badge-small">↑</span>{/if}

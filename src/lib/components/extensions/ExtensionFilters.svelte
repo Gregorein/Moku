@@ -1,6 +1,7 @@
 <script lang="ts">
   import { MagnifyingGlass, ArrowsClockwise, Plus, GitBranch, ArrowCircleUp, CheckCircle, Rows, Globe } from "phosphor-svelte";
   import { FILTERS, type Filter, type Panel } from "$lib/components/extensions/lib/extensionHelpers";
+  import { langBadge, LANG_ALL } from "$lib/core/lang";
 
   interface Props {
     filter:         Filter;
@@ -79,9 +80,9 @@
 {#if availableLangs.length > 1}
   <div class="lang-bar">
     <button class="lang-pill" class:active={langFilter === null} onclick={() => onLang(null)}>All</button>
-    {#each availableLangs.filter((l) => l.toLowerCase() !== "all") as lang}
+    {#each availableLangs.filter((l) => l !== LANG_ALL) as lang}
       <button class="lang-pill" class:active={langFilter === lang} onclick={() => onLang(langFilter === lang ? null : lang)}>
-        {lang.toUpperCase()}
+        {langBadge(lang)}
       </button>
     {/each}
   </div>

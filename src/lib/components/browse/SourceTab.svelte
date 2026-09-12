@@ -11,6 +11,7 @@
   import ContextMenu            from "$lib/components/shared/ui/ContextMenu.svelte";
   import { PushPin, PushPinSlash, ArrowRight } from "phosphor-svelte";
   import type { Manga, Source } from "$lib/types";
+  import { canonicalLang, langBadge, LANG_ALL } from "$lib/core/lang";
 
   interface Props {
     allSources:           Source[];
@@ -22,9 +23,9 @@
   }
   let { allSources, availableLangs, loadingSources, localSource, onPreview, preselectedSourceId }: Props = $props();
 
-  const preferredLang = $derived(settingsState.settings.preferredExtensionLang ?? "en");
+  const preferredLang = $derived(canonicalLang(settingsState.settings.preferredExtensionLang ?? LANG_ALL));
 
-  let src_selectedLang  = $state("all");
+  let src_selectedLang  = $state(LANG_ALL);
   let src_activeSource: Source | null = $state(null);
   let src_browseResults: Manga[]      = $state([]);
   let src_loadingBrowse               = $state(false);
@@ -67,17 +68,17 @@
     untrack(() => {
       if (!src_langInitialized) {
         src_langInitialized = true;
-        if (src_selectedLang === "all" && langs.has(preferredLang)) {
+        if (src_selectedLang === LANG_ALL && preferredLang !== LANG_ALL && langs.has(preferredLang)) {
           src_selectedLang = preferredLang;
         }
-      } else if (src_selectedLang !== "all" && !langs.has(src_selectedLang)) {
-        src_selectedLang = langs.has(preferredLang) ? preferredLang : "all";
+      } else if (src_selectedLang !== LANG_ALL && !langs.has(src_selectedLang)) {
+        src_selectedLang = langs.has(preferredLang) ? preferredLang : LANG_ALL;
       }
     });
   });
 
   const src_visibleSources = $derived.by(() => {
-    if (src_selectedLang !== "all") {
+    if (src_selectedLang !== LANG_ALL) {
       return allSources.filter((s) => s.lang === src_selectedLang);
     }
     const map = new Map<string, Source>();
@@ -171,9 +172,9 @@
     <div class="srcLangRow">
       <span class="langPocketLabel">Language</span>
       <select class="langSelect" bind:value={src_selectedLang}>
-        <option value="all">All</option>
-        {#each availableLangs.filter((l) => l.toLowerCase() !== "all") as lang (lang)}
-          <option value={lang}>{lang.toUpperCase()}{lang === preferredLang ? " ★" : ""}</option>
+        <option value={LANG_ALL}>All</option>
+        {#each availableLangs.filter((l) => l !== LANG_ALL) as lang (lang)}
+          <option value={lang}>{langBadge(lang)}{lang === preferredLang ? " ★" : ""}</option>
         {/each}
       </select>
     </div>
@@ -233,8 +234,8 @@
           >
             <ExtensionIcon src={src.iconUrl} alt="" size={20} class="splitSourceIcon" />
             <span class="splitItemLabel">{src.name}</span>
-            {#if src_selectedLang === "all"}
-              <span class="sourceLang">{src.lang.toUpperCase()}</span>
+            {#if src_selectedLang === LANG_ALL}
+              <span class="sourceLang">{langBadge(src.lang)}</span>
             {/if}
             {#if src.isNsfw}<span class="nsfwBadge">18+</span>{/if}
           </button>

@@ -255,7 +255,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	gpuAcceleration: true,
 	serverUrl: 'http://localhost:6007',
 	serverAutoStart: true,
-	preferredExtensionLang: 'en',
+	preferredExtensionLang: 'all',
 	keybinds: DEFAULT_KEYBINDS,
 	idleTimeoutMin: 5,
 	splashCards: true,

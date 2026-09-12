@@ -8,6 +8,7 @@
   import Thumbnail              from "$lib/components/shared/manga/Thumbnail.svelte";
   import type { Manga, Source } from "$lib/types";
   import { toBrowseManga, coverFirst } from "$lib/components/browse/lib/searchFilter";
+  import { canonicalLang, langBadge, LANG_ALL } from "$lib/core/lang";
 
   interface Props {
     allSources:        Source[];
@@ -33,7 +34,7 @@
     onPrefillConsumed, onPreview,
   }: Props = $props();
 
-  const preferredLang = $derived(settingsState.settings.preferredExtensionLang ?? "en");
+  const preferredLang = $derived(canonicalLang(settingsState.settings.preferredExtensionLang ?? LANG_ALL));
 
   let kw_results:       SourceResult[] = $state([]);
   let kw_showAdvanced   = $state(false);
@@ -60,9 +61,12 @@
   $effect(() => {
     if (!allSources.length) return;
     const available = new Set(allSources.map((s) => s.lang));
-    kw_selectedLangs = available.has(preferredLang)
-      ? new Set([preferredLang])
-      : new Set(availableLangs.slice(0, 1));
+    kw_selectedLangs =
+      preferredLang === LANG_ALL
+        ? new Set(availableLangs)
+        : available.has(preferredLang)
+          ? new Set([preferredLang])
+          : new Set(availableLangs.slice(0, 1));
   });
 
   $effect(() => {
@@ -251,13 +255,13 @@
         <span class="advancedTitle">LANGUAGES</span>
         <div class="advancedActions">
           <button class="advancedLink" onclick={() => (kw_selectedLangs = new Set(availableLangs))}>All</button>
-          <button class="advancedLink" onclick={() => (kw_selectedLangs = new Set([preferredLang]))}>Reset</button>
+          <button class="advancedLink" onclick={() => (kw_selectedLangs = preferredLang === LANG_ALL ? new Set(availableLangs) : new Set([preferredLang]))}>Reset</button>
         </div>
       </div>
       <div class="langGrid">
         {#each availableLangs as lang (lang)}
           <button class="langChip" class:langChipActive={kw_selectedLangs.has(lang)} onclick={() => kwToggleLang(lang)}>
-            {lang === preferredLang ? `${lang.toUpperCase()} ★` : lang.toUpperCase()}
+            {lang === preferredLang ? `${langBadge(lang)} ★` : langBadge(lang)}
           </button>
         {/each}
       </div>

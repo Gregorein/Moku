@@ -1,10 +1,10 @@
 <script lang="ts">
   import { settingsState, updateSettings } from '$lib/state/settings.svelte'
-  import { addToast } from '$lib/state/notifications.svelte'
   import { platformService } from '$lib/platform-service'
 
   import { selectPortal as _defaultPortal } from '$lib/core/ui/selectPortal'
   import type { Action } from 'svelte/action'
+  import { canonicalLang, displayLang, langBadge, closestLang, KNOWN_LANGS, LANG_ALL } from '$lib/core/lang'
 
   interface Props {
     selectOpen:      string | null
@@ -20,81 +20,28 @@
   let triggerIdleTimeout = $state<HTMLButtonElement>(null!)
   $effect(() => { if (triggerIdleTimeout) registerTrigger('idle-timeout', triggerIdleTimeout) })
 
-  const CANONICAL_LANGS = [
-    'en','ja','ko','zh','zh-hans','zh-hant','es','es-419','pt','pt-br','fr','de','it','ru',
-    'id','vi','th','ar','tr','pl','nl','uk','ro','hu','cs','sv','fi','da','no','nb','el','he',
-    'hi','bn','ta','te','ms','fil','tl','ca','gl','eu','af','sq','hy','az','be','bg','hr','et',
-    'ka','is','kk','lv','lt','mk','mn','ne','sr','sk','sl','sw','fa','ur','km','lo','my','si',
-    'am','ku','ha','ig','yo','zu','xh'
-  ]
+  const currentLang = $derived(canonicalLang(settingsState.settings.preferredExtensionLang ?? LANG_ALL))
 
-  const knownLangs = CANONICAL_LANGS
+  let langDraft = $state(langBadge(settingsState.settings.preferredExtensionLang ?? LANG_ALL))
+  let langHint  = $state<string | null>(null)
 
-  let langDraft   = $state(settingsState.settings.preferredExtensionLang ?? '')
-  let langInvalid = $state(false)
-
-  function normLang(s: string) { return s.toLowerCase().replace(/[^a-z0-9]/g, '') }
-
-  function levenshtein(a: string, b: string): number {
-    const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
-    for (let j = 0; j <= b.length; j++) dp[0][j] = j
-    for (let i = 1; i <= a.length; i++) {
-      for (let j = 1; j <= b.length; j++) {
-        dp[i][j] = a[i - 1] === b[j - 1]
-          ? dp[i - 1][j - 1]
-          : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1])
-      }
-    }
-    return dp[a.length][b.length]
-  }
-
-  function closestLang(input: string): string | null {
-    const n = normLang(input)
-    if (!n || knownLangs.length === 0) return null
-    let best: string | null = null
-    let bestDist = Infinity
-    for (const lang of knownLangs) {
-      const d = levenshtein(n, normLang(lang))
-      if (d < bestDist) { bestDist = d; best = lang }
-    }
-    return bestDist <= 2 ? best : null
-  }
+  $effect(() => { langDraft = langBadge(currentLang) })
 
   function commitLangDraft() {
-    const trimmed = langDraft.trim()
+    const canon = canonicalLang(langDraft)
+    langHint = null
 
-    if (trimmed === '') {
-      langInvalid = false
-      updateSettings({ preferredExtensionLang: undefined })
-      return
+    if (canon === currentLang) { langDraft = langBadge(canon); return }
+
+    updateSettings({ preferredExtensionLang: canon })
+    langDraft = langBadge(canon)
+
+    if (canon !== LANG_ALL && !KNOWN_LANGS.includes(canon)) {
+      const suggestion = closestLang(canon)
+      langHint = suggestion
+        ? `Uncommon code — did you mean ${langBadge(suggestion)}?`
+        : 'Uncommon code — kept as entered.'
     }
-
-    const normed = normLang(trimmed)
-
-    if (normed === 'en') {
-      langInvalid = false
-      langDraft   = 'EN'
-      updateSettings({ preferredExtensionLang: undefined })
-      return
-    }
-
-    const exact = knownLangs.find((l) => normLang(l) === normed)
-    if (exact) {
-      langInvalid = false
-      langDraft   = exact.toUpperCase()
-      updateSettings({ preferredExtensionLang: exact })
-      return
-    }
-
-    langInvalid = true
-    updateSettings({ preferredExtensionLang: undefined })
-    const suggestion = closestLang(trimmed)
-    addToast({
-      kind:  'error',
-      title: `Unknown language "${trimmed.toUpperCase()}"`,
-      body:  suggestion ? `Did you mean "${suggestion.toUpperCase()}"? Defaulted to EN.` : 'Defaulted to EN.',
-      duration: 4500,
-    })
   }
 
 </script>
@@ -225,15 +172,18 @@
       <div class="s-row">
         <div class="s-row-info">
           <span class="s-label">Preferred source language</span>
-          <span class="s-desc">Used to pre-select languages in Search and deduplicate sources</span>
+          <span class="s-desc">
+            {displayLang(currentLang)} — pre-selects languages in Search and picks the primary of grouped sources. Use ALL for no preference.
+            {#if langHint}<br><span style="color:var(--color-error)">{langHint}</span>{/if}
+          </span>
         </div>
-        <input class="s-input" class:s-input-invalid={langInvalid}
-          style="width:72px;text-align:center;text-transform:uppercase"
+        <input class="s-input"
+          style="width:88px;text-align:center;text-transform:uppercase"
           value={langDraft}
-          oninput={(e) => { langDraft = e.currentTarget.value; langInvalid = false }}
+          oninput={(e) => { langDraft = e.currentTarget.value; langHint = null }}
           onblur={commitLangDraft}
           onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-          placeholder="en" spellcheck="false" />
+          placeholder="ALL" spellcheck="false" />
       </div>
     </div>
   </div>
@@ -246,5 +196,4 @@
   .s-seg-btn:not(:last-child) { border-right: 1px solid var(--border-strong); }
   .s-seg-btn.active { background: var(--accent-muted); color: var(--accent-fg); }
   .s-seg-btn:not(.active):hover { background: var(--bg-raised); color: var(--text-secondary); }
-  .s-input-invalid { border-color: var(--color-error, #c47a7a) !important; color: var(--color-error, #c47a7a); }
 </style>

@@ -7,6 +7,7 @@
   import type { Extension } from "$lib/server-adapters/types";
   import { matchesFilter, groupExtensions, validateUrl, type Filter, type Panel } from "$lib/components/extensions/lib/extensionHelpers";
   import { libraryCountByPkg, type LibraryManga } from "$lib/components/extensions/lib/extensionLibrary";
+  import { LANG_ALL } from "$lib/core/lang";
   import ExtensionFilters       from "$lib/components/extensions/ExtensionFilters.svelte";
   import ExtensionCard          from "$lib/components/extensions/ExtensionCard.svelte";
   import ExtensionSettingsPanel from "$lib/components/extensions/panels/ExtensionSettingsPanel.svelte";
@@ -345,13 +346,13 @@
 
   const availableLangs = $derived(
     serverTab
-      ? [...new Set(browseLanguages)].filter((l) => l.toLowerCase() !== "all").sort()
+      ? [...new Set(browseLanguages)].filter((l) => l !== LANG_ALL).sort()
       : [...new Set(
           extensions
             .filter((e) => matchesFilter(e, filter))
             .filter((e) => contentTypeFilter === "all" || e.contentType === contentTypeFilter)
             .map((e) => e.lang)
-        )].sort()
+        )].filter((l) => l !== LANG_ALL).sort()
   );
 
 

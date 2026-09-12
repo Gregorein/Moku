@@ -1,11 +1,15 @@
 import { gql, baseUrl } from './gql'
 import type { ContentType, Extension } from '$lib/server-adapters/types'
+import { canonicalLang } from '$lib/core/lang'
 
 const EXT_FIELDS = `
 	id repositoryId packageName name displayName version contentType lang iconUrl
 	isNsfw supportsLatest
 	apkUrl jarUrl jarPath installed enabled discoveredAt installedAt installedVersion needsUpdate
 `
+
+const normExt = (e: Extension): Extension => ({ ...e, lang: canonicalLang(e.lang) })
+const normExts = (list: Extension[] | null | undefined): Extension[] => (list ?? []).map(normExt)
 
 export interface ExtensionPage {
 	items: Extension[]
@@ -36,7 +40,11 @@ export const extensions = {
 			opts as Record<string, unknown>,
 			baseUrl()
 		)
-		return data.extensions
+		return {
+			...data.extensions,
+			items: normExts(data.extensions.items),
+			languages: Array.from(new Set((data.extensions.languages ?? []).map(canonicalLang))).sort(),
+		}
 	},
 
 	async availableExtensions(repositoryId: string): Promise<Extension[]> {
@@ -47,7 +55,7 @@ export const extensions = {
 			{ repositoryId },
 			baseUrl()
 		)
-		return data.availableExtensions
+		return normExts(data.availableExtensions)
 	},
 
 	async installedExtensions(): Promise<Extension[]> {
@@ -56,7 +64,7 @@ export const extensions = {
 			undefined,
 			baseUrl()
 		)
-		return data.installedExtensions
+		return normExts(data.installedExtensions)
 	},
 
 	async installExtension(packageName: string): Promise<Extension> {
@@ -67,7 +75,7 @@ export const extensions = {
 			{ packageName },
 			baseUrl()
 		)
-		return data.installExtension
+		return normExt(data.installExtension)
 	},
 
 	async uninstallExtension(packageName: string): Promise<Extension> {
@@ -78,7 +86,7 @@ export const extensions = {
 			{ packageName },
 			baseUrl()
 		)
-		return data.uninstallExtension
+		return normExt(data.uninstallExtension)
 	},
 
 	async updateExtension(packageName: string): Promise<Extension> {
@@ -89,7 +97,7 @@ export const extensions = {
 			{ packageName },
 			baseUrl()
 		)
-		return data.updateExtension
+		return normExt(data.updateExtension)
 	},
 
 	async installExternalExtension(url: string): Promise<Extension> {
@@ -100,6 +108,6 @@ export const extensions = {
 			{ url },
 			baseUrl()
 		)
-		return data.installExternalExtension
+		return normExt(data.installExternalExtension)
 	},
 }

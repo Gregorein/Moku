@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, CircleNotch, ArrowRight, Check, Warning, Sparkle, DownloadSimple, TrayArrowDown, ArrowsClockwise, Pause, Play, Trash, Books, FilmSlate } from "phosphor-svelte";
+  import { X, ArrowLeft, CircleNotch, ArrowRight, Check, Warning, Sparkle, DownloadSimple, TrayArrowDown, ArrowsClockwise, Pause, Play, Trash, Books, FilmSlate } from "phosphor-svelte";
   import { tsunagu } from "$lib/server-adapters/tsunagu";
   import Thumbnail from "$lib/components/shared/manga/Thumbnail.svelte";
   import ExtensionIcon from "$lib/components/extensions/ExtensionIcon.svelte";
@@ -11,6 +11,18 @@
   import type { ContentType, TrackerLibraryEntry } from "$lib/server-adapters/types";
   import { toBrowseManga, toSource } from "$lib/components/browse/lib/searchFilter";
   import { sourceErrorLabel } from "$lib/core/sourceErrors";
+  import { canonicalLang, langBadge, LANG_ALL } from "$lib/core/lang";
+  import {
+    STATUS_KEYS, EMPTY_LEDGER, LEDGER_VER,
+    SEARCH_GAP_MS, SEARCH_QUERY_GAP_MS, ANILIST_GAP_MS, SNAPSHOT_TTL_MS, MATCH_THRESHOLD, GOOD_ENOUGH,
+  } from "./trackerImport/types";
+  import type { Phase, EntryStatus, EntryResult, CachePayload, ImportLedger } from "./trackerImport/types";
+  import { sleep, alStatusToTrack, searchQueries, displayTitle, displaySub, scoreHit, previouslySeenIds } from "./trackerImport/utils";
+  import {
+    fromCachedMatch, buildCachePayload, hasResumableEntries,
+    writeCache, clearCacheStorage, readCache as readCacheStorage,
+    readLedger as readLedgerStorage, writeLedger,
+  } from "./trackerImport/storage";
 
   interface Props {
     trackerKey: string;
@@ -21,127 +33,12 @@
   }
   let { trackerKey, trackerName, username = null, onClose, onDone }: Props = $props();
 
-  const SEARCH_GAP_MS = 2000;
-  const SEARCH_QUERY_GAP_MS = 500;
-  const ANILIST_GAP_MS = 1200;
-  const SNAPSHOT_TTL_MS = 15 * 60 * 1000;
-  const MATCH_THRESHOLD = 0.3;
-  const GOOD_ENOUGH = 0.55;
-
-  const STATUS_KEYS = ["CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED", "REPEATING"] as const;
-
-  type Phase = "pick-target" | "matching" | "assign" | "importing" | "done";
-  type EntryStatus = "pending" | "searching" | "found" | "no-match" | "already" | "skipped" | "imported" | "failed";
-
-  interface EntryResult {
-    remote: TrackerLibraryEntry;
-    match: Manga | null;
-    similarity: number;
-    status: EntryStatus;
-    sourceId: string | null;
-    error?: string;
-    fresh?: boolean;
-  }
-
-  interface CachedMatch {
-    title: string;
-    thumbnailUrl: string;
-    sourceEntryId: string;
-    extensionId: string;
-    inLibrary: boolean;
-  }
-
-  interface CachePayload {
-    v: number;
-    trackerKey: string;
-    contentType?: ContentType;
-    sourceId: string;
-    statuses: string[];
-    entries: Array<{
-      remote: TrackerLibraryEntry;
-      match: CachedMatch | null;
-      similarity: number;
-      status: EntryStatus;
-      sourceId: string | null;
-      error?: string;
-    }>;
-    searchDone: number;
-    searchTotal: number;
-  }
-
-  interface ImportLedger {
-    v: number;
-    lastStatuses: string[];
-    lastSeen: Record<string, string[]>;
-    lastFetchedAt: number;
-  }
-
-  const CACHE_VER = 1;
-  const LEDGER_VER = 1;
-
-  const EMPTY_LEDGER: ImportLedger = { v: LEDGER_VER, lastStatuses: ["CURRENT"], lastSeen: {}, lastFetchedAt: 0 };
-
-  function titleSimilarity(a: string, b: string): number {
-    const norm = (s: string) =>
-      s.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
-    const wordsA = new Set(norm(a));
-    const wordsB = new Set(norm(b));
-    if (wordsA.size === 0 || wordsB.size === 0) return 0;
-    const intersection = [...wordsA].filter(w => wordsB.has(w)).length;
-    return intersection / new Set([...wordsA, ...wordsB]).size;
-  }
-
-  function alStatusToTrack(s: string): number {
-    switch (s) {
-      case "CURRENT": return 1;
-      case "PLANNING": return 2;
-      case "COMPLETED": return 3;
-      case "PAUSED": return 4;
-      case "DROPPED": return 5;
-      case "REPEATING": return 6;
-      default: return 2;
-    }
-  }
-
-  function sleep(ms: number) {
-    return new Promise<void>((resolve) => setTimeout(resolve, ms));
-  }
-
-  function searchQueries(remote: TrackerLibraryEntry): string[] {
-    const out: string[] = [];
-    for (const t of [remote.titleEnglish, remote.titleRomaji, remote.title]) {
-      const s = (t ?? "").trim();
-      if (s && !out.includes(s)) out.push(s);
-    }
-    return out;
-  }
-
-  function displayTitle(remote: TrackerLibraryEntry): string {
-    return (remote.titleEnglish || remote.title || remote.titleRomaji || "Untitled").trim();
-  }
-
-  function displaySub(remote: TrackerLibraryEntry): string | null {
-    const primary = displayTitle(remote);
-    const romaji = (remote.titleRomaji ?? "").trim();
-    if (romaji && romaji !== primary) return romaji;
-    return null;
-  }
-
-  function scoreHit(remote: TrackerLibraryEntry, resultTitle: string): number {
-    let best = 0;
-    for (const q of searchQueries(remote)) {
-      const s = titleSimilarity(q, resultTitle);
-      if (s > best) best = s;
-    }
-    return best;
-  }
-
   let phase: Phase = $state("pick-target");
   let importKind: ContentType = $state("MANGA");
   let installedSources: Source[] = $state([]);
   let loadingSources = $state(true);
   let targetSource: Source | null = $state(null);
-  let selectedLang = $state("all");
+  let selectedLang = $state(LANG_ALL);
   let langStripEl: HTMLDivElement | undefined = $state();
   let langStripOverflow = $state(false);
   let selectedStatuses = $state<string[]>(["CURRENT"]);
@@ -177,7 +74,7 @@
   })));
   const allSources = $derived(installedSources.filter(s => s.contentType === importKind));
   const availableLangs = $derived.by(() => {
-    const langs = Array.from(new Set<string>(allSources.map(s => s.lang))).sort();
+    const langs = Array.from(new Set<string>(allSources.map(s => canonicalLang(s.lang)))).sort();
     const en = langs.indexOf("en");
     if (en > 0) { langs.splice(en, 1); langs.unshift("en"); }
     return langs;
@@ -200,7 +97,7 @@
     return () => ro.disconnect();
   });
   const visibleSources = $derived.by(() => {
-    if (selectedLang !== "all") return allSources.filter(s => s.lang === selectedLang);
+    if (selectedLang !== LANG_ALL) return allSources.filter(s => canonicalLang(s.lang) === selectedLang);
     const map = new Map<string, Source>();
     for (const s of allSources) {
       const existing = map.get(s.name);
@@ -209,11 +106,11 @@
     return Array.from(map.values());
   });
   const assignSources = $derived.by(() => {
-    const pref = settingsState.settings.preferredExtensionLang ?? "";
+    const pref = canonicalLang(settingsState.settings.preferredExtensionLang);
     return [...allSources].sort((a, b) => {
-      if (pref) {
-        if (a.lang === pref && b.lang !== pref) return -1;
-        if (b.lang === pref && a.lang !== pref) return 1;
+      if (pref !== LANG_ALL) {
+        if (canonicalLang(a.lang) === pref && canonicalLang(b.lang) !== pref) return -1;
+        if (canonicalLang(b.lang) === pref && canonicalLang(a.lang) !== pref) return 1;
       }
       return a.displayName.localeCompare(b.displayName);
     });
@@ -271,112 +168,27 @@
     return src.displayName;
   }
 
-  function cacheKey() {
-    return `moku:tracker-import:${trackerKey}:${importKind}`;
-  }
-
-  function ledgerKey() {
-    return `moku:tracker-import-ledger:${trackerKey}:${importKind}`;
-  }
-
-  function legacyCacheKey() {
-    return `moku:tracker-import:${trackerKey}`;
-  }
-
-  function legacyLedgerKey() {
-    return `moku:tracker-import-ledger:${trackerKey}`;
-  }
-
-  function toCachedMatch(m: Manga | null): CachedMatch | null {
-    if (!m?.sourceEntryId) return null;
-    return {
-      title: m.title,
-      thumbnailUrl: m.thumbnailUrl,
-      sourceEntryId: m.sourceEntryId,
-      extensionId: m.extensionId ?? "",
-      inLibrary: m.inLibrary,
-    };
-  }
-
-  function fromCachedMatch(m: CachedMatch | null): Manga | null {
-    if (!m) return null;
-    return {
-      id: `${m.extensionId}-${m.sourceEntryId}`,
-      title: m.title,
-      thumbnailUrl: m.thumbnailUrl,
-      inLibrary: m.inLibrary,
-      sourceEntryId: m.sourceEntryId,
-      extensionId: m.extensionId,
-      sourceId: m.extensionId,
-    };
-  }
-
   function persistCache() {
-    if (typeof localStorage === "undefined") return;
     if (entries.length === 0) return;
-    const leftover = entries.some(e =>
-      e.status === "pending" || e.status === "searching" || e.status === "no-match" || e.status === "found",
-    );
-    if (!leftover) {
+    if (!hasResumableEntries(entries)) {
       clearCache();
       return;
     }
-    const payload: CachePayload = {
-      v: CACHE_VER,
-      trackerKey,
-      contentType: importKind,
-      sourceId: targetSource?.id ?? "",
-      statuses: [...selectedStatuses],
-      entries: entries.map(e => ({
-        remote: e.remote,
-        match: toCachedMatch(e.match),
-        similarity: e.similarity,
-        status: e.status === "searching" ? "pending" : e.status,
-        sourceId: e.sourceId,
-        error: e.error,
-      })),
-      searchDone: searchProgress.done,
-      searchTotal: searchProgress.total,
-    };
-    try {
-      localStorage.setItem(cacheKey(), JSON.stringify(payload));
-      draft = payload;
-    } catch { /* quota */ }
+    const payload = buildCachePayload(
+      trackerKey, importKind, targetSource?.id ?? "", selectedStatuses,
+      entries, searchProgress.done, searchProgress.total,
+    );
+    if (writeCache(trackerKey, importKind, payload)) draft = payload;
   }
 
   function clearCache() {
-    try {
-      localStorage.removeItem(cacheKey());
-      if (importKind === "MANGA") localStorage.removeItem(legacyCacheKey());
-    } catch { /* ignore */ }
+    clearCacheStorage(trackerKey, importKind);
     draft = null;
-  }
-
-  function readLedger(): ImportLedger {
-    if (typeof localStorage === "undefined") return { ...EMPTY_LEDGER };
-    try {
-      const raw = localStorage.getItem(ledgerKey())
-        ?? (importKind === "MANGA" ? localStorage.getItem(legacyLedgerKey()) : null);
-      if (!raw) return { ...EMPTY_LEDGER };
-      const p = JSON.parse(raw) as ImportLedger;
-      if (p.v !== LEDGER_VER) return { ...EMPTY_LEDGER };
-      return {
-        v: LEDGER_VER,
-        lastStatuses: Array.isArray(p.lastStatuses) && p.lastStatuses.length ? p.lastStatuses : ["CURRENT"],
-        lastSeen: p.lastSeen && typeof p.lastSeen === "object" ? p.lastSeen : {},
-        lastFetchedAt: typeof p.lastFetchedAt === "number" ? p.lastFetchedAt : 0,
-      };
-    } catch {
-      return { ...EMPTY_LEDGER };
-    }
   }
 
   function persistLedger(patch: Partial<ImportLedger>) {
     ledger = { ...ledger, ...patch, v: LEDGER_VER };
-    if (typeof localStorage === "undefined") return;
-    try {
-      localStorage.setItem(ledgerKey(), JSON.stringify(ledger));
-    } catch { /* quota */ }
+    writeLedger(trackerKey, importKind, ledger);
   }
 
   function rememberSeen(rows: TrackerLibraryEntry[], statuses: string[]) {
@@ -385,10 +197,6 @@
       lastSeen[key] = rows.filter(e => (e.status || "").toUpperCase() === key).map(e => e.remoteId);
     }
     persistLedger({ lastSeen, lastFetchedAt: Date.now(), lastStatuses: [...selectedStatuses] });
-  }
-
-  function previouslySeenIds(): Set<string> {
-    return new Set(Object.values(ledger.lastSeen).flat());
   }
 
   function snapshotIsFresh(): boolean {
@@ -443,21 +251,6 @@
     return { rows: remote, fromCache: false };
   }
 
-  function readCache(): CachePayload | null {
-    if (typeof localStorage === "undefined") return null;
-    try {
-      const raw = localStorage.getItem(cacheKey())
-        ?? (importKind === "MANGA" ? localStorage.getItem(legacyCacheKey()) : null);
-      if (!raw) return null;
-      const p = JSON.parse(raw) as CachePayload;
-      if (p.v !== CACHE_VER || p.trackerKey !== trackerKey || !Array.isArray(p.entries) || p.entries.length === 0) return null;
-      if (p.contentType && p.contentType !== importKind) return null;
-      return p;
-    } catch {
-      return null;
-    }
-  }
-
   function applyCache(p: CachePayload) {
     selectedStatuses = p.statuses.length ? [...p.statuses] : selectedStatuses;
     targetSource = sourceById(p.sourceId);
@@ -469,7 +262,7 @@
       status: e.status === "searching" ? "pending" : e.status,
       sourceId: e.sourceId,
       error: e.error,
-      fresh: ledger.lastFetchedAt > 0 && !previouslySeenIds().has(e.remote.remoteId) && e.status !== "already" && e.status !== "imported",
+      fresh: ledger.lastFetchedAt > 0 && !previouslySeenIds(ledger).has(e.remote.remoteId) && e.status !== "already" && e.status !== "imported",
     }));
     searchProgress = { done: p.searchDone, total: p.searchTotal || p.entries.length };
   }
@@ -488,6 +281,14 @@
 
   function stopWork() {
     halt = true;
+  }
+
+  function goBack() {
+    halt = true;
+    cancelled = false;
+    persistCache();
+    if (listSnapshot.length) rememberSeen(listSnapshot, [...STATUS_KEYS]);
+    phase = "pick-target";
   }
 
   function close() {
@@ -530,17 +331,17 @@
   }
 
   function applyKindChrome() {
-    const prefLang = settingsState.settings.preferredExtensionLang ?? "";
-    const langs = new Set(installedSources.filter(s => s.contentType === importKind).map(s => s.lang));
-    selectedLang = prefLang && langs.has(prefLang) && langs.size > 1 ? prefLang : "all";
+    const prefLang = canonicalLang(settingsState.settings.preferredExtensionLang);
+    const langs = new Set(installedSources.filter(s => s.contentType === importKind).map(s => canonicalLang(s.lang)));
+    selectedLang = prefLang !== LANG_ALL && langs.has(prefLang) && langs.size > 1 ? prefLang : LANG_ALL;
     targetSource = null;
     massSourceId = "";
     listSnapshot = [];
     snapshotAt = 0;
     pulledIds = [];
     snapshotTask = null;
-    draft = readCache();
-    ledger = readLedger();
+    draft = readCacheStorage(trackerKey, importKind);
+    ledger = readLedgerStorage(trackerKey, importKind);
     selectedStatuses = (!draft && ledger.lastStatuses.length) ? [...ledger.lastStatuses] : ["CURRENT"];
     if (draft?.statuses.length) selectedStatuses = [...draft.statuses];
   }
@@ -597,11 +398,11 @@
     return { match: null, similarity: best?.similarity ?? 0, status: "no-match" };
   }
 
-  async function startSearch(target: Source) {
+  async function startMatchRun(mode: "search" | "stub", target?: Source) {
     halt = false;
-    stubImport = false;
-    targetSource = target;
-    massSourceId = target.id;
+    stubImport = mode === "stub";
+    targetSource = mode === "search" ? target ?? null : null;
+    massSourceId = mode === "search" ? target?.id ?? "" : "";
     selectedIds = [];
     phase = "matching";
     entries = [];
@@ -625,15 +426,15 @@
       local.flatMap(m => (m.trackLinks ?? []).filter(l => l.trackerKey === trackerKey).map(l => l.remoteId)),
     );
     pulledIds = [...alreadyByRemote];
-    const seen = previouslySeenIds();
+    const seen = previouslySeenIds(ledger);
     const hasHistory = ledger.lastFetchedAt > 0;
 
     entries = remote.map(r => ({
       remote: r,
       match: null,
-      similarity: 0,
-      status: alreadyByRemote.has(r.remoteId) ? "already" : "pending",
-      sourceId: target.id,
+      similarity: mode === "stub" ? 1 : 0,
+      status: alreadyByRemote.has(r.remoteId) ? "already" : mode === "stub" ? "found" : "pending",
+      sourceId: mode === "search" ? target?.id ?? null : null,
       fresh: hasHistory && !seen.has(r.remoteId) && !alreadyByRemote.has(r.remoteId),
     }));
     entries.sort((a, b) => {
@@ -643,61 +444,16 @@
       if (b.fresh && !a.fresh) return 1;
       return 0;
     });
-    searchProgress = { done: 0, total: entries.length };
+    searchProgress = mode === "stub"
+      ? { done: entries.length, total: entries.length }
+      : { done: 0, total: entries.length };
     if (!fromCache) rememberSeen(remote, selectedStatuses);
     persistCache();
-    await continueMatching();
-  }
 
-  async function startStubImport() {
-    halt = false;
-    stubImport = true;
-    targetSource = null;
-    massSourceId = "";
-    selectedIds = [];
-    phase = "matching";
-    entries = [];
-    searchProgress = { done: 0, total: 0 };
-
-    let remote: TrackerLibraryEntry[];
-    let fromCache = false;
-    try {
-      const loaded = await loadRemoteList();
-      remote = loaded.rows;
-      fromCache = loaded.fromCache;
-    } catch (e: any) {
-      phase = "pick-target";
-      addToast({ kind: "error", title: "Couldn't fetch AniList list", body: e?.message ?? String(e) });
+    if (mode === "search") {
+      await continueMatching();
       return;
     }
-    if (cancelled || halt) return;
-
-    const local = await tsunagu.library(importKind).catch(() => []);
-    const alreadyByRemote = new Set(
-      local.flatMap(m => (m.trackLinks ?? []).filter(l => l.trackerKey === trackerKey).map(l => l.remoteId)),
-    );
-    pulledIds = [...alreadyByRemote];
-    const seen = previouslySeenIds();
-    const hasHistory = ledger.lastFetchedAt > 0;
-
-    entries = remote.map(r => ({
-      remote: r,
-      match: null,
-      similarity: 1,
-      status: alreadyByRemote.has(r.remoteId) ? "already" : "found",
-      sourceId: null,
-      fresh: hasHistory && !seen.has(r.remoteId) && !alreadyByRemote.has(r.remoteId),
-    }));
-    entries.sort((a, b) => {
-      if (a.status === "already" && b.status !== "already") return 1;
-      if (b.status === "already" && a.status !== "already") return -1;
-      if (a.fresh && !b.fresh) return -1;
-      if (b.fresh && !a.fresh) return 1;
-      return 0;
-    });
-    searchProgress = { done: entries.length, total: entries.length };
-    if (!fromCache) rememberSeen(remote, selectedStatuses);
-    persistCache();
     if (cancelled || halt) return;
     if (entries.every(e => e.status === "already")) {
       phase = "done";
@@ -897,7 +653,7 @@
         importProgress = { ...importProgress, done: importProgress.done + 1, failed: importProgress.failed + 1 };
       }
       persistCache();
-      if (!dryRun) await sleep(ANILIST_GAP_MS);
+      if (!dryRun && entry.sourceId) await sleep(ANILIST_GAP_MS);
     }
 
     if (!dryRun) {
@@ -958,21 +714,28 @@
   <div class="modal" class:modal-wide={phase === "assign"} class:modal-fill={phase === "matching" || phase === "assign" || phase === "importing"}>
 
     <div class="modal-header">
-      <div class="source-context">
-        <div class="source-icon-wrap logo">
-          <TrackerLogo trackerKey={trackerKey} size={22} />
-        </div>
-        <div class="source-context-info">
-          <span class="modal-eyebrow">Library import</span>
-          <span class="modal-title">Import from {trackerName}</span>
-          <span class="modal-sub">
-            <Warning size={12} weight="bold" />
-            AniList rate-limits bulk imports, so matching on a source will be slower
-          </span>
+      <div class="header-left">
+        {#if phase === "matching" || phase === "assign" || phase === "done"}
+          <button class="header-nav-btn" onclick={goBack} title="Back to import options">
+            <ArrowLeft size={14} weight="light" />
+          </button>
+        {/if}
+        <div class="source-context">
+          <div class="source-icon-wrap logo">
+            <TrackerLogo trackerKey={trackerKey} size={22} />
+          </div>
+          <div class="source-context-info">
+            <span class="modal-eyebrow">Library import</span>
+            <span class="modal-title">Import from {trackerName}</span>
+            <span class="modal-sub">
+              <Warning size={12} weight="bold" />
+              AniList rate-limits bulk imports, so matching on a source will be slower
+            </span>
+          </div>
         </div>
       </div>
       {#if phase !== "importing"}
-        <button class="close-btn" onclick={close}><X size={14} weight="light" /></button>
+        <button class="header-nav-btn" onclick={close} title="Close"><X size={14} weight="light" /></button>
       {/if}
     </div>
 
@@ -996,9 +759,13 @@
             <div class="phase-label-row">
               <span class="phase-label">Type</span>
             </div>
-            <div class="status-chips">
-              <button class="status-chip" class:status-chip-active={importKind === "MANGA"} onclick={() => setImportKind("MANGA")}>Manga</button>
-              <button class="status-chip" class:status-chip-active={importKind === "ANIME"} onclick={() => setImportKind("ANIME")}>Anime</button>
+            <div class="kind-seg">
+              <button class="kind-seg-btn" class:kind-seg-active={importKind === "MANGA"} onclick={() => setImportKind("MANGA")}>
+                <Books size={12} weight={importKind === "MANGA" ? "fill" : "regular"} /> Manga
+              </button>
+              <button class="kind-seg-btn" class:kind-seg-active={importKind === "ANIME"} onclick={() => setImportKind("ANIME")}>
+                <FilmSlate size={12} weight={importKind === "ANIME" ? "fill" : "regular"} /> Anime
+              </button>
             </div>
             <div class="phase-label-row">
               <span class="phase-label">List statuses</span>
@@ -1035,7 +802,7 @@
               <span class="phase-label">Import into library</span>
             </div>
             <div class="source-list source-list-tight">
-              <button class="source-row source-row-library" onclick={() => void startStubImport()}>
+              <button class="source-row source-row-library" onclick={() => void startMatchRun("stub")}>
                 <div class="source-icon-wrap logo">
                   {#if isAnime}
                     <FilmSlate size={18} weight="light" />
@@ -1045,7 +812,7 @@
                 </div>
                 <div class="source-info">
                   <span class="source-name">Library only · no source</span>
-                  <span class="source-meta">Titles and AniList trackin (assign a source later)</span>
+                  <span class="source-meta">Titles and AniList tracking (assign a source later)</span>
                 </div>
                 <ArrowRight size={13} weight="light" class="source-arrow" />
               </button>
@@ -1067,10 +834,10 @@
                     <button class="src-lang-nav" onclick={() => scrollLangStrip(-1)}>‹</button>
                   {/if}
                   <div class="src-lang-chips" bind:this={langStripEl}>
-                    <button class="src-lang-chip" class:src-lang-chip-active={selectedLang === "all"} onclick={() => selectedLang = "all"}>All</button>
+                    <button class="src-lang-chip" class:src-lang-chip-active={selectedLang === LANG_ALL} onclick={() => selectedLang = LANG_ALL}>All</button>
                     {#each availableLangs as lang}
                       <button class="src-lang-chip" class:src-lang-chip-active={selectedLang === lang} onclick={() => selectedLang = lang}>
-                        {lang.toUpperCase()}
+                        {langBadge(lang)}
                       </button>
                     {/each}
                   </div>
@@ -1081,13 +848,13 @@
               {/if}
               <div class="source-list">
                 {#each visibleSources as src}
-                  <button class="source-row" onclick={() => startSearch(src)}>
+                  <button class="source-row" onclick={() => void startMatchRun("search", src)}>
                     <div class="source-icon-wrap">
                       <ExtensionIcon src={src.iconUrl} alt={src.name} class="source-icon" size={36} />
                     </div>
                     <div class="source-info">
                       <span class="source-name">{src.displayName}</span>
-                      <span class="source-meta">{src.lang.toUpperCase()}{src.isNsfw ? " · NSFW" : ""}</span>
+                      <span class="source-meta">{langBadge(src.lang)}{src.isNsfw ? " · NSFW" : ""}</span>
                     </div>
                     <ArrowRight size={13} weight="light" class="source-arrow" />
                   </button>
@@ -1415,6 +1182,7 @@
   .modal-fill { align-self: stretch; }
 
   .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--border-dim); flex-shrink: 0; }
+  .header-left { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
   .source-context { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
   .source-icon-wrap { width: 36px; height: 36px; border-radius: var(--radius-md); overflow: hidden; flex-shrink: 0; background: var(--bg-raised); border: 1px solid var(--border-dim); }
   .source-icon-wrap.logo { display: flex; align-items: center; justify-content: center; }
@@ -1429,8 +1197,9 @@
     letter-spacing: var(--tracking-wide); line-height: 1.4;
   }
   .modal-sub :global(svg) { flex-shrink: 0; margin-top: 1px; color: var(--text-faint); }
-  .close-btn { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: var(--radius-md); color: var(--text-faint); background: none; border: none; cursor: pointer; transition: color var(--t-base), background var(--t-base); flex-shrink: 0; margin-top: 2px; }
-  .close-btn:hover { color: var(--text-muted); background: var(--bg-raised); }
+  .header-nav-btn { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: var(--radius-md); color: var(--text-faint); background: none; border: 1px solid transparent; cursor: pointer; transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease, transform 0.08s ease; flex-shrink: 0; margin-top: 2px; }
+  .header-nav-btn:hover { color: var(--text-muted); background: var(--bg-raised); border-color: var(--border-dim); }
+  .header-nav-btn:active { transform: scale(0.9); background: var(--bg-overlay); }
 
   .body { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
 
@@ -1443,9 +1212,17 @@
   .centered { flex: 1; min-height: calc(4 * var(--source-row-h)); display: flex; align-items: center; justify-content: center; padding: var(--sp-8); }
   .hint { font-family: var(--font-ui); font-size: var(--text-xs); color: var(--text-faint); letter-spacing: var(--tracking-wide); }
 
+  .kind-seg { display: flex; margin: 0 var(--sp-4) var(--sp-2); border: 1px solid var(--border-dim); border-radius: var(--radius-md); overflow: hidden; }
+  .kind-seg-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px var(--sp-3); font-family: var(--font-ui); font-size: var(--text-xs); letter-spacing: var(--tracking-wide); color: var(--text-faint); background: transparent; border: none; cursor: pointer; transition: background 0.12s ease, color 0.12s ease, transform 0.08s ease; }
+  .kind-seg-btn:not(:last-child) { border-right: 1px solid var(--border-dim); }
+  .kind-seg-btn:hover:not(.kind-seg-active) { color: var(--text-muted); background: var(--bg-raised); }
+  .kind-seg-btn:active { transform: scale(0.97); }
+  .kind-seg-active { background: var(--accent-muted); color: var(--accent-fg); }
+
   .status-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: 0 var(--sp-4) var(--sp-2); flex-shrink: 0; }
-  .status-chip { font-family: var(--font-ui); font-size: var(--text-2xs); letter-spacing: var(--tracking-wide); padding: 3px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-dim); background: none; color: var(--text-faint); cursor: pointer; white-space: nowrap; transition: color var(--t-base), border-color var(--t-base), background var(--t-base); display: inline-flex; align-items: center; gap: 6px; }
+  .status-chip { font-family: var(--font-ui); font-size: var(--text-2xs); letter-spacing: var(--tracking-wide); padding: 4px 10px; border-radius: var(--radius-md); border: 1px solid var(--border-dim); background: none; color: var(--text-faint); cursor: pointer; white-space: nowrap; transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease, transform 0.08s ease; display: inline-flex; align-items: center; gap: 6px; }
   .status-chip:hover { color: var(--text-muted); background: var(--bg-raised); }
+  .status-chip:active { transform: scale(0.95); }
   .status-chip-active { color: var(--accent-fg); border-color: var(--accent-dim); background: var(--accent-muted); }
   .chip-badge { font-size: 9px; letter-spacing: var(--tracking-wide); padding: 0 5px; border-radius: var(--radius-sm); border: 1px solid var(--border-dim); color: var(--text-faint); }
   .chip-badge-new { color: var(--accent-fg); border-color: var(--accent-dim); background: var(--accent-muted); }

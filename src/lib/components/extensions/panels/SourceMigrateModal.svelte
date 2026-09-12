@@ -10,6 +10,7 @@
   import { settingsState }  from "$lib/state/settings.svelte";
   import type { Manga, Source } from "$lib/types";
   import type { PreviewChapter } from "$lib/server-adapters/types";
+  import { canonicalLang, langBadge, LANG_ALL } from "$lib/core/lang";
   import { toBrowseManga, toSource } from "$lib/components/browse/lib/searchFilter";
   import type { LibraryManga }          from "$lib/components/extensions/lib/extensionLibrary";
 
@@ -51,7 +52,7 @@
   let allSources: Source[]      = $state([]);
   let loadingSources            = $state(true);
   let targetSource: Source | null = $state(null);
-  let selectedLang              = $state("all");
+  let selectedLang              = $state(LANG_ALL);
   let langStripEl: HTMLDivElement | undefined = $state();
   let langStripOverflow = $state(false);
 
@@ -83,7 +84,7 @@
     return () => ro.disconnect();
   });
   const visibleSources   = $derived.by(() => {
-    if (selectedLang !== "all") return allSources.filter(s => s.lang === selectedLang);
+    if (selectedLang !== LANG_ALL) return allSources.filter(s => s.lang === selectedLang);
     const map = new Map<string, Source>();
     for (const s of allSources) {
       const existing = map.get(s.name);
@@ -103,9 +104,9 @@
         allSources = exts
           .filter(e => e.installed && e.id !== sourceId && (!contentType || e.contentType === contentType))
           .map(toSource);
-        const prefLang = settingsState.settings.preferredExtensionLang ?? "";
+        const prefLang = canonicalLang(settingsState.settings.preferredExtensionLang ?? LANG_ALL);
         const langs    = new Set(allSources.map(s => s.lang));
-        if (prefLang && langs.has(prefLang) && langs.size > 1) selectedLang = prefLang;
+        if (prefLang !== LANG_ALL && langs.has(prefLang) && langs.size > 1) selectedLang = prefLang;
       })
       .catch(console.error)
       .finally(() => { loadingSources = false; });
@@ -223,10 +224,10 @@
                 <button class="src-lang-nav" onclick={() => scrollLangStrip(-1)}>‹</button>
               {/if}
               <div class="src-lang-chips" bind:this={langStripEl}>
-                <button class="src-lang-chip" class:src-lang-chip-active={selectedLang === "all"} onclick={() => selectedLang = "all"}>All</button>
+                <button class="src-lang-chip" class:src-lang-chip-active={selectedLang === LANG_ALL} onclick={() => selectedLang = LANG_ALL}>All</button>
                 {#each availableLangs as lang}
                   <button class="src-lang-chip" class:src-lang-chip-active={selectedLang === lang} onclick={() => selectedLang = lang}>
-                    {lang.toUpperCase()}
+                    {langBadge(lang)}
                   </button>
                 {/each}
               </div>
@@ -243,7 +244,7 @@
                 </div>
                 <div class="source-info">
                   <span class="source-name">{src.displayName}</span>
-                  <span class="source-meta">{src.lang.toUpperCase()}{src.isNsfw ? " · NSFW" : ""}</span>
+                  <span class="source-meta">{langBadge(src.lang)}{src.isNsfw ? " · NSFW" : ""}</span>
                 </div>
                 <ArrowRight size={13} weight="light" class="source-arrow" />
               </button>
