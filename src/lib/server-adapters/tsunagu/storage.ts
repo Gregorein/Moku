@@ -1,11 +1,11 @@
 import { gql, baseUrl } from './gql'
-import type { StorageInfo, DatabaseBackup } from '$lib/server-adapters/types'
+import type { StorageInfo, DatabaseBackup, BackupImportResult } from '$lib/server-adapters/types'
 
 const STORAGE_FIELDS = `
 	usedBytes totalBytes freeBytes dataDir mediaDir databasePath
 	categories { key label path bytes fileCount clearable }
 `
-const BACKUP_FIELDS = `name path bytes createdAt`
+const BACKUP_FIELDS = `name path bytes createdAt kind`
 
 export const storage = {
 	async storageInfo(): Promise<StorageInfo> {
@@ -64,5 +64,25 @@ export const storage = {
 			baseUrl(),
 		)
 		return data.deleteDatabaseBackup
+	},
+
+	async exportMihonBackup(): Promise<DatabaseBackup> {
+		const data = await gql<{ exportMihonBackup: DatabaseBackup }>(
+			`mutation ExportMihonBackup { exportMihonBackup { ${BACKUP_FIELDS} } }`,
+			undefined,
+			baseUrl(),
+		)
+		return data.exportMihonBackup
+	},
+
+	async importMihonBackup(name: string): Promise<BackupImportResult> {
+		const data = await gql<{ importMihonBackup: BackupImportResult }>(
+			`mutation ImportMihonBackup($name: String!) {
+				importMihonBackup(name: $name) { mangaImported mangaSkipped categoriesImported trackingImported warnings }
+			}`,
+			{ name },
+			baseUrl(),
+		)
+		return data.importMihonBackup
 	},
 }

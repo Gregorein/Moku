@@ -196,6 +196,15 @@ export interface DatabaseBackup {
 	path: string
 	bytes: number
 	createdAt: string
+	kind: string
+}
+
+export interface BackupImportResult {
+	mangaImported: number
+	mangaSkipped: number
+	categoriesImported: number
+	trackingImported: number
+	warnings: string[]
 }
 
 export interface Folder {

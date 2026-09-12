@@ -305,10 +305,12 @@
   let srvError      = $state<string | null>(null)
   let srvClearing   = $state<string | null>(null)
 
-  let dbBackups     = $state<import('$lib/server-adapters/types').DatabaseBackup[]>([])
-  let dbBackupsErr  = $state<string | null>(null)
-  let backingUp     = $state(false)
-  let deletingBk    = $state<string | null>(null)
+  let dbBackups        = $state<import('$lib/server-adapters/types').DatabaseBackup[]>([])
+  let dbBackupsErr     = $state<string | null>(null)
+  let backingUp        = $state(false)
+  let deletingBk       = $state<string | null>(null)
+  let exportingMihon   = $state(false)
+  let importingMihon   = $state<string | null>(null)
 
   async function loadServerStorage() {
     srvLoading = true; srvError = null
@@ -355,6 +357,37 @@
     } catch (e) {
       toast({ kind: 'error', title: 'Delete failed', body: e instanceof Error ? e.message : String(e) })
     } finally { deletingBk = null }
+  }
+
+  async function exportMihon() {
+    if (exportingMihon) return
+    exportingMihon = true
+    try {
+      await tsunagu.exportMihonBackup()
+      await loadDbBackups()
+      toast({ kind: 'success', title: 'Library exported', body: 'Manga and light novels only — anime titles are not included.' })
+    } catch (e) {
+      toast({ kind: 'error', title: 'Export failed', body: e instanceof Error ? e.message : String(e) })
+    } finally { exportingMihon = false }
+  }
+
+  async function importMihon(name: string) {
+    if (importingMihon) return
+    importingMihon = name
+    try {
+      const res = await tsunagu.importMihonBackup(name)
+      const parts = [`${res.mangaImported} imported`]
+      if (res.mangaSkipped) parts.push(`${res.mangaSkipped} skipped (source not installed)`)
+      if (res.trackingImported) parts.push(`${res.trackingImported} tracking links`)
+      toast({ kind: res.mangaSkipped ? 'error' : 'success', title: 'Library imported', body: parts.join(' · ') })
+      if (res.warnings.length) {
+        for (const w of res.warnings.slice(0, 5)) toast({ kind: 'error', title: 'Import warning', body: w })
+      }
+      const { loadLibrary } = await import('$lib/state/library.svelte')
+      await loadLibrary(true)
+    } catch (e) {
+      toast({ kind: 'error', title: 'Import failed', body: e instanceof Error ? e.message : String(e) })
+    } finally { importingMihon = null }
   }
 
   async function loadBackupList() {
@@ -648,14 +681,14 @@
         <div class="s-row">
           <div class="s-row-info">
             <span class="s-label">Server database</span>
-            <span class="s-desc">Online SQLite snapshot. Restore is manual: stop the server, swap the database file, start it again.</span>
+            <span class="s-desc">Full SQLite snapshot — every table, all content types. Restore is manual: stop the server, swap the database file, start it again.</span>
           </div>
           <button class="s-btn s-btn-accent" onclick={makeDbBackup} disabled={backingUp}>{backingUp ? 'Backing up…' : 'Back up now'}</button>
         </div>
 
         {#if dbBackupsErr}<div class="s-banner s-banner-error">{dbBackupsErr}</div>{/if}
 
-        {#each dbBackups as b (b.name)}
+        {#each dbBackups.filter(b => b.kind === 'sqlite') as b (b.name)}
           <div class="s-row">
             <div class="s-row-info">
               <span class="s-label mono" style="font-family:monospace;font-size:var(--text-xs)">{b.name}</span>
@@ -670,22 +703,49 @@
           </div>
         {/each}
 
-        <p class="s-subsection-title">Library backup</p>
+        <p class="s-subsection-title">Library backup (Tachiyomi format)</p>
 
         <div class="s-row">
           <div class="s-row-info">
-            <span class="s-label">Library backup</span>
-            <span class="s-desc">Not available yet.</span>
+            <span class="s-label">Export library</span>
+            <span class="s-desc">
+              Writes a <span style="font-family:monospace">.tachibk</span> file — the same format Mihon, Suwayomi and other Tachiyomi forks use.
+              <strong>Manga and light novels only</strong> — anime has no equivalent in that format and is never included.
+            </span>
           </div>
+          <button class="s-btn s-btn-accent" onclick={exportMihon} disabled={exportingMihon}>{exportingMihon ? 'Exporting…' : 'Export'}</button>
         </div>
 
         <div class="s-row">
           <div class="s-row-info">
-            <span class="s-label">Restore from file</span>
-            <span class="s-desc">Not available yet.</span>
+            <span class="s-label">Import a backup</span>
+            <span class="s-desc">
+              Drop a <span style="font-family:monospace">.tachibk</span> file (from Mihon, Suwayomi, or exported here) into the backups folder below, then import it.
+              Only titles whose source is currently installed are matched; tracking is only restored for trackers you're already logged into.
+            </span>
           </div>
-          <button class="s-btn" disabled>Browse</button>
+          {#if srvStorage?.dataDir && canOpenFolder()}
+            <button class="s-btn" onclick={() => openCustomFolder(`${srvStorage!.dataDir!.replace(/[\\/]+$/, '')}/backups`)}>Open backups folder</button>
+          {/if}
         </div>
+
+        {#each dbBackups.filter(b => b.kind === 'mihon') as b (b.name)}
+          <div class="s-row">
+            <div class="s-row-info">
+              <span class="s-label mono" style="font-family:monospace;font-size:var(--text-xs)">{b.name}</span>
+              <span class="s-desc">{fmtBytes(b.bytes)} · {new Date(b.createdAt).toLocaleString()}</span>
+            </div>
+            <div class="s-btn-row">
+              <button class="s-btn" onclick={() => platformService.openPath(b.path)}>Reveal</button>
+              <button class="s-btn s-btn-accent" disabled={importingMihon === b.name} onclick={() => importMihon(b.name)}>
+                {importingMihon === b.name ? 'Importing…' : 'Import'}
+              </button>
+              <button class="s-btn s-btn-danger" disabled={deletingBk === b.name} onclick={() => deleteDbBackup(b.name)}>
+                {deletingBk === b.name ? '…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        {/each}
 
         <p class="s-subsection-title">App data backup</p>
 
