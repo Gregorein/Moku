@@ -50,6 +50,8 @@ Moku is a fast, minimal manga, novel and anime reader. It's a lightweight Tauri 
 - **Automation** — pre-download titles automatically and optionally delete chapters after reading (accessible from Series Detail)
 - **Discord Rich Presence** — shows title, current chapter, and elapsed timer in your Discord status; configurable in Settings → General
 - **Bundled backend** — the desktop app launches and supervises Tsunagu for you; no separate install
+- **Library backup** — export/import your manga & novel library in the Mihon/Tachiyomi `.tachibk` format, plus scheduled SQLite snapshots of the whole server
+- **Server auth** — connect to a password-protected Tsunagu instance from anywhere; sessions persist across launches. Separate from the local app-lock PIN / Windows Hello
 - **Multiple themes** — Dark, Light, Midnight, Warm, High Contrast, and more
 - **Auto-updates** — in-app update checker with silent background notifications
 - **Improved NSFW filtering** — expanded tag parser gives the Hide NSFW setting better coverage across sources
@@ -144,7 +146,7 @@ Download the `.dmg` from the [releases page](https://github.com/moku-project/Mok
 
 The desktop and Nix builds bundle and launch [Tsunagu](https://github.com/moku-project/Tsunagu) automatically. To run against your own instance instead, start Tsunagu separately — Moku connects to `http://127.0.0.1:6007` by default.
 
-You can point Moku at any Tsunagu instance — local or remote — via **Settings → General → Server URL**.
+You can point Moku at any Tsunagu instance — local or remote — via **Settings → General → Server URL**. If that server has a password set, Moku will prompt for it once and stay signed in on that device.
 
 ---
 

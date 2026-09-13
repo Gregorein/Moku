@@ -3,7 +3,7 @@ import type { Extension, SearchResult } from '$lib/server-adapters/types'
 import { fetchChangelogForVersion, type ChangelogEntry } from '$lib/core/changelog'
 import { settingsState, updateSettings } from '$lib/state/settings.svelte'
 
-export type AppStatus = 'booting' | 'not-configured' | 'locked' | 'ready' | 'error'
+export type AppStatus = 'booting' | 'not-configured' | 'locked' | 'auth-required' | 'ready' | 'error'
 
 class AppStore {
 	settingsOpen: boolean = $state(false)

@@ -3,6 +3,8 @@ import { initPlatformService, platformService } from '$lib/platform-service'
 import { tsunagu } from '$lib/server-adapters/tsunagu'
 import { appState } from '$lib/state/app.svelte'
 import { settingsState, updateSettings } from '$lib/state/settings.svelte'
+import { AuthRequiredError } from '$lib/graphql/client'
+import { loadPersistedToken, setAuthToken } from '$lib/state/auth.svelte'
 
 
 const MAX_ATTEMPTS = 40
@@ -85,7 +87,8 @@ async function pingServer(): Promise<boolean> {
 	try {
 		await tsunagu.about()
 		return true
-	} catch {
+	} catch (e) {
+		if (e instanceof AuthRequiredError) throw e
 		return false
 	}
 }
@@ -114,6 +117,13 @@ export async function initApp(): Promise<void> {
 	appState.appDir = await platformService.getAppDir().catch(() => '')
 
 	appState.serverUrl = resolvedServerUrl()
+	await loadPersistedToken()
+}
+
+export async function submitLogin(password: string): Promise<void> {
+	const { token } = await tsunagu.login(password)
+	await setAuthToken(token)
+	startProbe(0)
 }
 
 function handleProbeSuccess(gen: number) {
@@ -143,7 +153,14 @@ export async function startProbe(initialDelay = 100): Promise<void> {
 	async function probe() {
 		if (gen !== probeGeneration) return
 		tries++
-		const ok = await pingServer()
+		let ok: boolean
+		try {
+			ok = await pingServer()
+		} catch {
+			if (gen !== probeGeneration) return
+			appState.status = 'auth-required'
+			return
+		}
 		if (gen !== probeGeneration) return
 
 		if (ok) {
@@ -171,7 +188,14 @@ function startBackgroundProbe(gen: number) {
 	async function bgProbe() {
 		if (gen !== probeGeneration) return
 		bgTries++
-		const ok = await pingServer()
+		let ok: boolean
+		try {
+			ok = await pingServer()
+		} catch {
+			if (gen !== probeGeneration) return
+			appState.status = 'auth-required'
+			return
+		}
 		if (gen !== probeGeneration) return
 		if (ok) {
 			handleProbeSuccess(gen)

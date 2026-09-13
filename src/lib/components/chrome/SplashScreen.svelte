@@ -43,7 +43,7 @@
   const isDev   = import.meta.env.DEV
 
   interface Props {
-    mode?:           'loading' | 'idle' | 'locked'
+    mode?:           'loading' | 'idle' | 'locked' | 'auth'
     ringFull?:       boolean
     failed?:         boolean
     notConfigured?:  boolean
@@ -58,6 +58,8 @@
     errorLog?:       string
     serverUrl?:      string
     autoStart?:      boolean
+    authBusy?:       boolean
+    authError?:      string
     onSetServerUrl?: (url: string) => void
     onReady?:        () => void
     onUnlock?:       () => void
@@ -67,6 +69,7 @@
     onDismiss?:      () => void
     onCopyLog?:      () => void
     onOpenDataDir?:  () => void
+    onLogin?:        (password: string) => void
   }
 
   let {
@@ -75,8 +78,11 @@
     pinLen = 4, pinCorrect = '', windowsHelloEnabled = false,
     errorMessage = '', errorLog = '',
     serverUrl = '', autoStart = true, onSetServerUrl,
-    onReady, onUnlock, onRetry, onBypass, onSkip, onDismiss, onCopyLog, onOpenDataDir,
+    authBusy = false, authError = '',
+    onReady, onUnlock, onRetry, onBypass, onSkip, onDismiss, onCopyLog, onOpenDataDir, onLogin,
   }: Props = $props()
+
+  let authPassword = $state('')
 
   let logCopied = $state(false)
 
@@ -175,6 +181,21 @@
       setTimeout(() => (pinShake = false), 500)
     }
   }
+
+  function submitAuth() {
+    if (!authPassword || authBusy) return
+    onLogin?.(authPassword)
+  }
+
+  $effect(() => {
+    if (mode !== 'auth') return
+    authPassword = ''
+  })
+
+  $effect(() => {
+    if (!authError) return
+    authPassword = ''
+  })
 
   function onPinKey(e: KeyboardEvent) {
     if (mode !== 'locked' || exitLock) return
@@ -570,6 +591,28 @@
       {/if}
     </div>
 
+  {:else if mode === 'auth'}
+    <div class="pin-card">
+      <div class="logo-wrap">
+        <div class="logo-glow"></div>
+        <img src={logoUrl} alt="Moku" class="logo-breathe" style="width:56px;height:56px;border-radius:14px;display:block;position:relative" />
+      </div>
+      <p class="pin-label">Server login required</p>
+      <input
+        class="auth-input"
+        type="password"
+        placeholder="Password"
+        autocomplete="current-password"
+        disabled={authBusy}
+        bind:value={authPassword}
+        onkeydown={(e) => { if (e.key === 'Enter') submitAuth() }}
+      />
+      {#if authError}<p class="auth-error">{authError}</p>{/if}
+      <button class="hello-btn" disabled={authBusy || !authPassword} onclick={submitAuth}>
+        {authBusy ? 'Signing in…' : 'Sign in'}
+      </button>
+    </div>
+
   {:else if isTauri || failed || notConfigured || ringFull}
     <div style="position:relative;width:{ringSize}px;height:{ringSize}px;margin-bottom:20px;display:flex;align-items:center;justify-content:center">
       {#if !failed && !notConfigured && isTauri}
@@ -654,6 +697,10 @@
   .pin-dot   { width:10px; height:10px; border-radius:50%; border:1px solid var(--border-strong); background:transparent; transition:background 0.12s, border-color 0.12s; }
   .pin-dot.filled { background:var(--accent); border-color:var(--accent); }
   .pin-shake { animation:pinShake 0.42s ease; }
+
+  .auth-input { width:100%; box-sizing:border-box; background:var(--bg-overlay); border:1px solid var(--border-base); border-radius:var(--radius-md); padding:8px 10px; color:var(--text-primary); font-family:var(--font-ui); font-size:13px; outline:none; }
+  .auth-input:focus { border-color:var(--border-strong); }
+  .auth-error { margin:0; font-family:var(--font-ui); font-size:11px; color:var(--color-error); }
 
   .hello-btn { margin-top:var(--sp-1); padding:6px 14px; border-radius:var(--radius-md); border:1px solid var(--border-base); background:transparent; color:var(--text-faint); cursor:pointer; font-family:var(--font-ui); font-size:11px; letter-spacing:0.04em; transition:border-color 0.15s, color 0.15s; }
   .hello-btn:hover:not(:disabled) { border-color:var(--border-strong); color:var(--text-secondary); }

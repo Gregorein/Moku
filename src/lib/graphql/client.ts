@@ -1,3 +1,5 @@
+import { authHeaders } from '$lib/state/auth.svelte'
+
 export class GraphQLError extends Error {
 	code?: string
 	grpc?: string
@@ -10,6 +12,13 @@ export class GraphQLError extends Error {
 	}
 }
 
+export class AuthRequiredError extends Error {
+	constructor() {
+		super('Authentication required')
+		this.name = 'AuthRequiredError'
+	}
+}
+
 export async function gql<T>(
 	query: string,
 	variables: Record<string, unknown> | undefined,
@@ -18,10 +27,14 @@ export async function gql<T>(
 ): Promise<T> {
 	const res = await fetch(`${baseUrl}/api/graphql`, {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
+		headers: { 'Content-Type': 'application/json', ...authHeaders() },
 		body: JSON.stringify({ query, variables }),
 		signal,
 	})
+
+	if (res.status === 401) {
+		throw new AuthRequiredError()
+	}
 
 	if (!res.ok) {
 		throw new Error(`GraphQL request failed: HTTP ${res.status}`)

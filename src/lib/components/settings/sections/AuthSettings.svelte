@@ -1,0 +1,156 @@
+<script lang="ts">
+  import { tsunagu } from '$lib/server-adapters/tsunagu'
+  import { addToast } from '$lib/state/notifications.svelte'
+  import { settingsState, updateSettings } from '$lib/state/settings.svelte'
+  import { platformService } from '$lib/platform-service'
+  import { setAuthToken, clearAuthToken } from '$lib/state/auth.svelte'
+
+  const isTauri = platformService.platform === 'tauri'
+
+  let passwordSet   = $state(false)
+  let authLoading   = $state(true)
+  let password      = $state('')
+  let authBusy      = $state(false)
+  let authError     = $state('')
+
+  async function loadAuth() {
+    authLoading = true
+    try {
+      passwordSet = (await tsunagu.authStatus()).passwordSet
+    } catch {
+    } finally {
+      authLoading = false
+    }
+  }
+
+  $effect(() => { loadAuth() })
+
+  async function enable() {
+    if (authBusy || !password) return
+    authBusy = true
+    authError = ''
+    try {
+      await tsunagu.setPassword(password)
+      const { token } = await tsunagu.login(password)
+      await setAuthToken(token)
+      addToast({ kind: 'success', title: 'Server password set', body: 'This server now requires a password to connect.' })
+      passwordSet = true
+      password = ''
+    } catch (e) {
+      authError = e instanceof Error ? e.message : String(e)
+    } finally {
+      authBusy = false
+    }
+  }
+
+  async function disable() {
+    if (authBusy) return
+    authBusy = true
+    authError = ''
+    try {
+      await tsunagu.disableServerAuth()
+      await clearAuthToken()
+      addToast({ kind: 'success', title: 'Server password disabled', body: 'This server no longer requires a password.' })
+      passwordSet = false
+    } catch (e) {
+      authError = e instanceof Error ? e.message : String(e)
+    } finally {
+      authBusy = false
+    }
+  }
+
+  function toggleServerAuth() {
+    if (passwordSet) disable()
+  }
+
+  let pin = $state(settingsState.settings.appLockPin ?? '')
+
+  function savePin(value: string) {
+    const next = value.replace(/\D/g, '').slice(0, 8)
+    pin = next
+    updateSettings({ appLockPin: next })
+  }
+
+  let helloAvailable = $state(false)
+
+  $effect(() => {
+    if (!isTauri) return
+    let cancelled = false
+    import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke<boolean>('windows_hello_available'))
+      .then(v => { if (!cancelled) helloAvailable = v })
+      .catch(() => { if (!cancelled) helloAvailable = false })
+    return () => { cancelled = true }
+  })
+</script>
+
+<div class="s-panel">
+  <div class="s-section">
+    <p class="s-section-title">Server password</p>
+    <div class="s-section-body">
+      {#if authLoading}
+        <div class="s-row"><span class="s-desc">Loading…</span></div>
+      {:else}
+        <div class="s-row">
+          <div class="s-row-info">
+            <span class="s-label">Require a password</span>
+            <span class="s-desc">Needed to reach this server from outside your own machine. Once you sign in on a device, it stays signed in automatically.</span>
+          </div>
+          <button role="switch" aria-checked={passwordSet} aria-label="Require a password"
+            class="s-toggle" class:on={passwordSet} disabled={authBusy}
+            onclick={toggleServerAuth}>
+            <span class="s-toggle-thumb"></span>
+          </button>
+        </div>
+        {#if !passwordSet}
+          <div class="s-row">
+            <div class="s-row-info"><span class="s-label">Password</span></div>
+            <input class="s-input" type="password" autocomplete="new-password" disabled={authBusy}
+              bind:value={password}
+              onkeydown={(e) => { if (e.key === 'Enter') enable() }} />
+          </div>
+          <div class="s-row">
+            <span class="s-desc">The static API token, if set, keeps working alongside a password.</span>
+            <button class="s-btn" disabled={authBusy || !password} onclick={enable}>
+              {authBusy ? 'Saving…' : 'Enable'}
+            </button>
+          </div>
+        {/if}
+        {#if authError}
+          <div class="s-row"><span class="s-desc ss-err">{authError}</span></div>
+        {/if}
+      {/if}
+    </div>
+  </div>
+
+  <div class="s-section">
+    <p class="s-section-title">App lock</p>
+    <div class="s-section-body">
+      <div class="s-row">
+        <div class="s-row-info">
+          <span class="s-label">PIN</span>
+          <span class="s-desc">Ask for a PIN when Moku starts. Leave empty to disable.</span>
+        </div>
+        <input class="s-input" type="password" inputmode="numeric" autocomplete="off" placeholder="No PIN"
+          value={pin} oninput={(e) => savePin((e.currentTarget as HTMLInputElement).value)} />
+      </div>
+      {#if isTauri && helloAvailable}
+        <div class="s-row">
+          <div class="s-row-info">
+            <span class="s-label">Windows Hello</span>
+            <span class="s-desc">Use Windows Hello instead of typing the PIN.</span>
+          </div>
+          <button role="switch" aria-checked={settingsState.settings.appLockWindowsHello ?? false} aria-label="Windows Hello"
+            class="s-toggle" class:on={settingsState.settings.appLockWindowsHello ?? false} disabled={!pin}
+            onclick={() => updateSettings({ appLockWindowsHello: !(settingsState.settings.appLockWindowsHello ?? false) })}>
+            <span class="s-toggle-thumb"></span>
+          </button>
+        </div>
+      {/if}
+    </div>
+  </div>
+</div>
+
+<style>
+  .ss-err { color: var(--color-error); }
+</style>

@@ -10,6 +10,7 @@ import { trackers } from './trackers'
 import { serverSettings } from './serverSettings'
 import { contentFilter } from './contentFilter'
 import { storage } from './storage'
+import { auth } from './auth'
 
 export const tsunagu = {
 	...meta,
@@ -24,4 +25,5 @@ export const tsunagu = {
 	...serverSettings,
 	...contentFilter,
 	...storage,
+	...auth,
 }
