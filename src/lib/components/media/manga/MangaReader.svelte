@@ -76,7 +76,8 @@
 
   const showResumeBanner = $derived(
     readerState.resumeVisible && readerState.resumePage > 1 &&
-    readerState.pageNumber === readerState.resumePage
+    readerState.pageNumber === readerState.resumePage &&
+    readerState.uiVisible
   );
 
   const adjacent = $derived.by(() => {

@@ -48,6 +48,11 @@ prepare() {
   cd "$pkgname"
   export CARGO_HOME="$srcdir/cargo-home"
   pnpm install --frozen-lockfile
+  # package.json's "prepare" script swallows failures (`|| echo ''`), so a
+  # sandboxed/scriptless install can silently skip it and leave
+  # .svelte-kit/tsconfig.json missing, which breaks the later vite build.
+  # Run it explicitly so a real failure here is loud.
+  pnpm exec svelte-kit sync
   cargo fetch --locked --manifest-path src-tauri/Cargo.toml \
     --target "$(rustc -vV | sed -n 's/host: //p')"
 }

@@ -5,7 +5,7 @@ export type PlatformFeature =
   | 'app-updates'
   | 'discord-rpc'
 
-export type Platform = 'tauri' | 'capacitor' | 'web'
+export type Platform = 'tauri' | 'web'
 
 export interface DiscordAssets {
   largeImage?: string

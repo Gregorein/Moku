@@ -11,7 +11,6 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "build:static": "cross-env MOKU_TARGET=static vite build",
     "build:node": "MOKU_TARGET=node vite build",
-    "build:android": "MOKU_TARGET=static vite build",
     "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri:build": "tauri build"
   },
@@ -30,18 +29,12 @@
     "vite": "^8.2.2"
   },
   "dependencies": {
-    "@capacitor/app": "^8.1.1",
-    "@capacitor/browser": "^8.0.4",
-    "@capacitor/core": "^8.5.0",
-    "@capacitor/filesystem": "^8.1.3",
-    "@capacitor/preferences": "^8.0.1",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-http": "^2.5.9",
     "@tauri-apps/plugin-os": "^2.3.2",
     "@tauri-apps/plugin-shell": "^2.3.5",
-    "capacitor-native-biometric": "^4.2.2",
     "dashjs": "^5.2.1",
     "hls.js": "^1.7.1",
     "jassub": "^2.5.14",
