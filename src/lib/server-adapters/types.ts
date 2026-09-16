@@ -41,6 +41,7 @@ export interface LibraryEntry {
 	contentType: ContentType
 	title: string
 	thumbnailUrl: string | null
+	hasCoverOverride?: boolean
 	inLibrary: boolean
 	description: string | null
 	status: string | null

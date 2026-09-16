@@ -19,6 +19,7 @@ export interface Manga {
   id:           string
   title:        string
   thumbnailUrl: string
+  hasCoverOverride?: boolean
   inLibrary:    boolean
 
   downloadCount?: number

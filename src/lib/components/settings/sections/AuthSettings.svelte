@@ -94,7 +94,7 @@
         <div class="s-row">
           <div class="s-row-info">
             <span class="s-label">Require a password</span>
-            <span class="s-desc">Needed to reach this server from outside your own machine. Once you sign in on a device, it stays signed in automatically.</span>
+            <span class="s-desc">Needed to reach this server from outside your own machine.</span>
           </div>
           <button role="switch" aria-checked={passwordSet} aria-label="Require a password"
             class="s-toggle" class:on={passwordSet} disabled={authBusy}

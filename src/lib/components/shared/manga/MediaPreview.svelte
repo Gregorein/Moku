@@ -600,7 +600,7 @@
             <div class="chapter-meta">
               <span class="chapter-label">
                 {totalCount} {totalCount === 1 ? unitOne : unitMany}
-                {readCount > 0 ? ` · ${readCount} read` : ""}
+                {readCount > 0 ? ` · ${readCount} ${isAnime ? "watched" : "read"}` : ""}
                 {unreadCount > 0 && readCount > 0 ? ` · ${unreadCount} left` : ""}
                 {downloadedCount > 0 ? ` · ${downloadedCount} dl` : ""}
               </span>

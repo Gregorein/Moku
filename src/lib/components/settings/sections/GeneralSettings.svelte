@@ -89,7 +89,7 @@
       <label class="s-row">
         <div class="s-row-info">
           <span class="s-label">Auto-start bundled server</span>
-          <span class="s-desc">Launch and manage Tsunagu on startup. Turn off to run your own server at the URL above.</span>
+          <span class="s-desc">Launch and manage Tsunagu automatically — turn off to run your own server instead.</span>
         </div>
         <button role="switch" aria-checked={settingsState.settings.serverAutoStart ?? true} aria-label="Auto-start bundled server"
           class="s-toggle" class:on={settingsState.settings.serverAutoStart ?? true}
@@ -173,7 +173,7 @@
         <div class="s-row-info">
           <span class="s-label">Preferred source language</span>
           <span class="s-desc">
-            {displayLang(currentLang)} — pre-selects languages in Search and picks the primary of grouped sources. Use ALL for no preference.
+            {displayLang(currentLang)} — pre-selects this language in Search and source grouping.
             {#if langHint}<br><span style="color:var(--color-error)">{langHint}</span>{/if}
           </span>
         </div>

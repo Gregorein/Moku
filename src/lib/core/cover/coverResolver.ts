@@ -14,6 +14,14 @@ export type CoverCandidate = {
 
 const FUZZY_SCORE_THRESHOLD = 0.65
 
+// Once a cover override is set, `thumbnailUrl` resolves to the override, not
+// the source's own cover — so the "This source" candidate needs a URL that
+// explicitly bypasses the override to stay pickable as a way back.
+export function sourceCoverUrl(url: string): string {
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}source=original`
+}
+
 function normalizeUrl(url: string): string {
   try {
     const u = new URL(url)
@@ -47,14 +55,21 @@ export function coverCandidatesSync(
   title: string,
   ownUrl: string,
   mangaById: Map<string, CoverManga & { title: string }>,
+  hasCoverOverride = false,
 ): CoverCandidate[] {
   const linkedIds = seriesState.settings.mangaLinks?.[mangaId] ?? []
   const fuzzyIds  = fuzzyMatchIds(mangaId, title, mangaById)
   const current   = settingsState.settings.mangaPrefs?.[mangaId]?.coverUrl ?? ownUrl
   const allIds    = Array.from(new Set([...linkedIds, ...fuzzyIds]))
 
-  const raw: { mangaId: string; url: string; label: string }[] = [
-    { mangaId, url: ownUrl, label: 'This source' },
+  // The source candidate's URL carries a `source=original` marker so it stays
+  // distinct from the active override (see sourceCoverUrl) — normalizeUrl
+  // strips query strings entirely, so its activeness can't be derived from a
+  // plain URL comparison like the rest; it's simply never active while an
+  // override is set.
+  const sourceUrl = hasCoverOverride ? sourceCoverUrl(ownUrl) : ownUrl
+  const raw: { mangaId: string; url: string; label: string; isActive?: boolean }[] = [
+    { mangaId, url: sourceUrl, label: 'This source', isActive: !hasCoverOverride && normalizeUrl(ownUrl) === normalizeUrl(current) },
     ...allIds.flatMap(id => {
       const m = mangaById.get(id)
       return m ? [{ mangaId: m.id, url: m.thumbnailUrl, label: m.source?.displayName ?? `ID ${m.id}` }] : []
@@ -69,7 +84,7 @@ export function coverCandidatesSync(
       seen.add(key)
       return true
     })
-    .map(c => ({ ...c, isActive: normalizeUrl(c.url) === normalizeUrl(current) }))
+    .map(c => ({ ...c, isActive: c.isActive ?? normalizeUrl(c.url) === normalizeUrl(current) }))
 }
 
 export async function dedupeByImage(candidates: CoverCandidate[]): Promise<CoverCandidate[]> {

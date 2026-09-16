@@ -30,7 +30,7 @@
   const mangaById = $derived(new Map(allManga.map(m => [m.id, m as MangaWithTitle])));
 
   const syncCandidates = $derived(
-    coverCandidatesSync(manga.id, manga.title, manga.thumbnailUrl, mangaById)
+    coverCandidatesSync(manga.id, manga.title, manga.thumbnailUrl, mangaById, manga.hasCoverOverride)
   );
 
   let candidates  = $state<typeof syncCandidates>([]);

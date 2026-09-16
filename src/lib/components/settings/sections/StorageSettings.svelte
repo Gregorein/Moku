@@ -154,6 +154,7 @@
   let confirmedDownloadsPath   = $state(settingsState.settings.serverDownloadsPath ?? '')
   let confirmedLocalSourcePath = $state(settingsState.settings.serverLocalSourcePath ?? '')
 
+  let migrateKind     = $state<'downloads' | 'local'>('downloads')
   let migrateFrom     = $state<string | null>(null)
   let migrateTo       = $state<string | null>(null)
   let migrating       = $state(false)
@@ -214,9 +215,13 @@
     const [dlErr, locErr] = await Promise.all([validatePath(dl), validatePath(loc)])
     if (dlErr || locErr) { pathsFieldError = { ...(dlErr ? { dl: dlErr } : {}), ...(locErr ? { loc: locErr } : {}) }; return }
 
+    // A local-source-path change is applied server-side too (it decides
+    // where the scanner looks), so it goes through the same migrate prompt
+    // as downloads instead of being saved as a purely client-side setting.
     if (loc !== confirmedLocalSourcePath) {
-      updateSettings({ serverLocalSourcePath: loc })
-      confirmedLocalSourcePath = loc
+      migrateKind = 'local'; migrateFrom = confirmedLocalSourcePath; migrateTo = loc
+      migrateError = null
+      return
     }
 
     const newDl = dl || defaultDownloadsPath
@@ -226,7 +231,7 @@
       return
     }
     // A downloads-path change is applied server-side: prompt for migration.
-    migrateFrom = oldDl; migrateTo = dl
+    migrateKind = 'downloads'; migrateFrom = oldDl; migrateTo = dl
     migrateError = null
   }
 
@@ -235,22 +240,40 @@
     migrating = true; migrateError = null
     migrateProgress = migrate ? { done: 0, total: 0, current: 'Moving files…' } : null
     try {
-      const res = await tsunagu.relocateDownloads(migrateTo, migrate)
-      updateSettings({ serverDownloadsPath: migrateTo })
-      confirmedDownloadsPath = migrateTo
-      downloadsPathInput = migrateTo
-      migrateFrom = null; migrateTo = null; migrateProgress = null
-      pathsSaved = true; setTimeout(() => pathsSaved = false, 2000)
-      toast({
-        kind: 'success',
-        title: migrate ? 'Downloads migrated' : 'Downloads path changed',
-        body: migrate
-          ? `Moved ${res.movedFiles} ${res.movedFiles === 1 ? 'file' : 'files'} (${fmtBytes(res.movedBytes)}) to ${res.newPath}`
-          : `New downloads go to ${res.newPath}. Existing files stay where they are.`,
-      })
-      await Promise.all([fetchStorage(), loadServerStorage()])
+      if (migrateKind === 'local') {
+        const res = await tsunagu.relocateLocalSource(migrateTo, migrate)
+        updateSettings({ serverLocalSourcePath: migrateTo })
+        confirmedLocalSourcePath = migrateTo
+        localSourcePathInput = migrateTo
+        migrateFrom = null; migrateTo = null; migrateProgress = null
+        pathsSaved = true; setTimeout(() => pathsSaved = false, 2000)
+        toast({
+          kind: 'success',
+          title: migrate ? 'Local source migrated' : 'Local source path changed',
+          body: migrate
+            ? `Moved ${res.movedFiles} ${res.movedFiles === 1 ? 'file' : 'files'} (${fmtBytes(res.movedBytes)}) to ${res.newPath}`
+            : `Local source now reads from ${res.newPath}. Existing files stay where they are.`,
+        })
+        const { loadLibrary } = await import('$lib/state/library.svelte')
+        await Promise.all([loadLibrary(true), fetchStorage(), loadServerStorage()])
+      } else {
+        const res = await tsunagu.relocateDownloads(migrateTo, migrate)
+        updateSettings({ serverDownloadsPath: migrateTo })
+        confirmedDownloadsPath = migrateTo
+        downloadsPathInput = migrateTo
+        migrateFrom = null; migrateTo = null; migrateProgress = null
+        pathsSaved = true; setTimeout(() => pathsSaved = false, 2000)
+        toast({
+          kind: 'success',
+          title: migrate ? 'Downloads migrated' : 'Downloads path changed',
+          body: migrate
+            ? `Moved ${res.movedFiles} ${res.movedFiles === 1 ? 'file' : 'files'} (${fmtBytes(res.movedBytes)}) to ${res.newPath}`
+            : `New downloads go to ${res.newPath}. Existing files stay where they are.`,
+        })
+        await Promise.all([fetchStorage(), loadServerStorage()])
+      }
     } catch (e: any) {
-      migrateError = e?.message ?? 'Failed to change downloads path'
+      migrateError = e?.message ?? `Failed to change ${migrateKind === 'local' ? 'local source' : 'downloads'} path`
     } finally { migrating = false }
   }
 
@@ -258,7 +281,8 @@
   const switchWithoutMigration = () => applyRelocation(false)
 
   function dismissMigration() {
-    downloadsPathInput = confirmedDownloadsPath
+    if (migrateKind === 'local') localSourcePathInput = confirmedLocalSourcePath
+    else downloadsPathInput = confirmedDownloadsPath
     migrateFrom = null; migrateTo = null; migrateError = null; migrateProgress = null
   }
 
@@ -440,9 +464,15 @@
   {#if migrateTo !== null}
     <div class="s-migrate-banner">
       <div class="s-migrate-body">
-        <span class="s-migrate-title">Move existing downloads to the new path?</span>
-        <span class="s-migrate-paths">{migrateFrom || 'current path'} → {migrateTo || 'server default'}</span>
-        <span class="s-desc">Migrate moves every downloaded chapter and episode and updates the library. Switch without moving keeps existing files where they are and only sends new downloads to the new path.</span>
+        <span class="s-migrate-title">
+          {migrateKind === 'local' ? 'Move existing local media to the new path?' : 'Move existing downloads to the new path?'}
+        </span>
+        <span class="s-migrate-paths">{migrateFrom || 'current path'} → {migrateTo || (migrateKind === 'local' ? 'media_dir/local' : 'server default')}</span>
+        <span class="s-desc">
+          {migrateKind === 'local'
+            ? "Migrate moves your local files over; switching without moving just points the scanner at the new folder."
+            : "Migrate moves your downloaded files over; switching without moving only sends new downloads to the new folder."}
+        </span>
         {#if migrating && !migrateProgress}<span class="s-desc">Working…</span>{/if}
         {#if migrateError}<span class="s-desc" style="color:var(--color-error)">{migrateError}</span>{/if}
       </div>
@@ -602,7 +632,7 @@
         <div class="s-row">
           <div class="s-row-info">
             <span class="s-label">Local source path</span>
-            <span class="s-desc">Read manga already on disk without an extension. Leave blank if unused.</span>
+            <span class="s-desc">Read manga, anime, or novels already on disk without an extension.</span>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
             <div class="s-btn-row">
@@ -681,7 +711,7 @@
         <div class="s-row">
           <div class="s-row-info">
             <span class="s-label">Server database</span>
-            <span class="s-desc">Full SQLite snapshot — every table, all content types. Restore is manual: stop the server, swap the database file, start it again.</span>
+            <span class="s-desc">Full SQLite snapshot — restore by swapping the file back in while the server is stopped.</span>
           </div>
           <button class="s-btn s-btn-accent" onclick={makeDbBackup} disabled={backingUp}>{backingUp ? 'Backing up…' : 'Back up now'}</button>
         </div>
@@ -709,8 +739,7 @@
           <div class="s-row-info">
             <span class="s-label">Export library</span>
             <span class="s-desc">
-              Writes a <span style="font-family:monospace">.tachibk</span> file — the same format Mihon, Suwayomi and other Tachiyomi forks use.
-              <strong>Manga and light novels only</strong> — anime has no equivalent in that format and is never included.
+              Writes a <span style="font-family:monospace">.tachibk</span> file (Mihon/Tachiyomi format) — <strong>manga and novels only</strong>, no anime.
             </span>
           </div>
           <button class="s-btn s-btn-accent" onclick={exportMihon} disabled={exportingMihon}>{exportingMihon ? 'Exporting…' : 'Export'}</button>
@@ -720,8 +749,7 @@
           <div class="s-row-info">
             <span class="s-label">Import a backup</span>
             <span class="s-desc">
-              Drop a <span style="font-family:monospace">.tachibk</span> file (from Mihon, Suwayomi, or exported here) into the backups folder below, then import it.
-              Only titles whose source is currently installed are matched; tracking is only restored for trackers you're already logged into.
+              Drop a <span style="font-family:monospace">.tachibk</span> file into the backups folder below, then import it.
             </span>
           </div>
           {#if srvStorage?.dataDir && canOpenFolder()}

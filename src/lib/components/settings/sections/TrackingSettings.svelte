@@ -122,7 +122,7 @@
               <p class="s-desc">MyAnimeList sync is not available yet.</p>
 
             {:else if !t.configured}
-              <p class="s-desc">No OAuth client for {t.name}. An operator sets <code>TSUNAGU_ANILIST_CLIENT_ID</code> and restarts Tsunagu.</p>
+              <p class="s-desc">No OAuth client configured for {t.name} — an operator needs to set <code>TSUNAGU_ANILIST_CLIENT_ID</code>.</p>
 
             {:else if t.isLoggedIn}
               <div class="trk-actions">
@@ -137,7 +137,7 @@
               </div>
 
             {:else}
-              <p class="s-desc">Open the authorization page and approve access. If it does not finish on its own, paste the token or redirected URL below.</p>
+              <p class="s-desc">Open the authorization page and approve access, or paste the redirected URL below.</p>
               <div class="trk-connect">
                 <div class="trk-row">
                   {#if polling[t.key]}

@@ -52,12 +52,23 @@ export const library = {
 		return data.rescanLocalMedia
 	},
 
+	async deleteLocalSeries(mediaId: string): Promise<boolean> {
+		const data = await gql<{ deleteLocalSeries: boolean }>(
+			`mutation DeleteLocalSeries($mediaId: ID!) {
+				deleteLocalSeries(mediaId: $mediaId)
+			}`,
+			{ mediaId },
+			baseUrl()
+		)
+		return data.deleteLocalSeries
+	},
+
 	async libraryEntry(id: string): Promise<LibraryEntry | null> {
 		const data = await gql<{ media: LibraryEntry | null }>(
 			`query Media($id: ID!) {
 				media(id: $id) {
 					id extensionId extensionName externalId contentType title inLibrary
-					thumbnailUrl description status author artist genres tags extensionRemovedAt addedAt sourceName
+					thumbnailUrl hasCoverOverride description status author artist genres tags extensionRemovedAt addedAt sourceName
 					unreadCount downloadCount: downloadedCount
 					source { id repositoryId packageName name displayName version contentType lang iconUrl isNsfw supportsLatest apkUrl jarUrl jarPath installed enabled discoveredAt installedAt installedVersion needsUpdate }
 					chapters {

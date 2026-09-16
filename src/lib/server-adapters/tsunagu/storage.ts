@@ -39,6 +39,17 @@ export const storage = {
 		return data.relocateDownloads
 	},
 
+	async relocateLocalSource(newPath: string, migrate: boolean): Promise<{ newPath: string; migrated: boolean; movedFiles: number; movedBytes: number }> {
+		const data = await gql<{ relocateLocalSource: { newPath: string; migrated: boolean; movedFiles: number; movedBytes: number } }>(
+			`mutation RelocateLocalSource($newPath: String!, $migrate: Boolean!) {
+				relocateLocalSource(newPath: $newPath, migrate: $migrate) { newPath migrated movedFiles movedBytes }
+			}`,
+			{ newPath, migrate },
+			baseUrl(),
+		)
+		return data.relocateLocalSource
+	},
+
 	async databaseBackups(): Promise<DatabaseBackup[]> {
 		const data = await gql<{ databaseBackups: DatabaseBackup[] }>(
 			`query DatabaseBackups { databaseBackups { ${BACKUP_FIELDS} } }`,

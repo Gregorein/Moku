@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { ArrowLeft, MagnifyingGlass, GearSix, Swap, Funnel, Check, CircleNotch } from "phosphor-svelte";
+  import { ArrowLeft, MagnifyingGlass, GearSix, Swap, Funnel, Check, CircleNotch, UploadSimple, PencilSimple, Trash } from "phosphor-svelte";
   import Thumbnail           from "$lib/components/shared/manga/Thumbnail.svelte";
   import { resolvedCover }   from "$lib/core/cover/coverResolver";
   import { tsunagu }         from "$lib/server-adapters/tsunagu";
   import { setPreviewManga } from "$lib/state/series.svelte";
+  import { platformService } from "$lib/platform-service";
+  import { addToast }        from "$lib/state/notifications.svelte";
 
   import { libraryByExtension, type LibraryManga, type SourceNode, type SourceLibrary } from "$lib/components/extensions/lib/extensionLibrary";
   import SourceMigrateModal  from "$lib/components/extensions/panels/SourceMigrateModal.svelte";
@@ -49,8 +51,8 @@
 
   const filtered = $derived((() => {
     let items = allManga;
-    const q = search.trim().toLowerCase();
-    if (q && !isLocal) items = items.filter((m: any) => m.title.toLowerCase().includes(q));
+    const q = (isLocal ? searchInput : search).trim().toLowerCase();
+    if (q) items = items.filter((m: any) => m.title.toLowerCase().includes(q));
     if (!isLocal) {
       if (activeFilters.unread)     items = items.filter((m: any) => m.unreadCount > 0);
       if (activeFilters.downloaded) items = items.filter((m: any) => m.downloadCount > 0);
@@ -58,14 +60,82 @@
     return items;
   })());
 
+  const canImport = $derived(isLocal && platformService.platform === "tauri");
+  let importing   = $state(false);
+  let importProgress = $state<{ copied: number; total: number } | null>(null);
+  let dragOver    = $state(false);
+  let renaming    = $state<{ id: string; title: string; contentType: string | null } | null>(null);
+  let renameInput = $state("");
+  let deleting    = $state<{ id: string; title: string } | null>(null);
+  let deleteBusy  = $state(false);
+  let mediaDir    = $state("");
+  let unlistenDrop: (() => void) | null = null;
+
   $effect(() => { load(); });
+
+  $effect(() => {
+    if (!canImport) return;
+    let cancelled = false;
+    (async () => {
+      const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+      const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+        if (cancelled) return;
+        if (event.payload.type === "over") { dragOver = true; return; }
+        if (event.payload.type === "leave") { dragOver = false; return; }
+        if (event.payload.type === "drop") {
+          dragOver = false;
+          void handleDrop(event.payload.paths);
+        }
+      });
+      if (cancelled) unlisten();
+      else unlistenDrop = unlisten;
+    })();
+    return () => { cancelled = true; unlistenDrop?.(); unlistenDrop = null; };
+  });
+
+  async function handleDrop(paths: string[]) {
+    if (importing || paths.length === 0) return;
+    importing = true;
+    importProgress = null;
+    try {
+      if (!mediaDir) mediaDir = (await tsunagu.storageInfo()).mediaDir;
+      const { importLocalPaths } = await import("$lib/core/localImport");
+      const { imported, errors } = await importLocalPaths(paths, mediaDir, (copied, total) => {
+        importProgress = { copied, total };
+      });
+      if (imported.length > 0) {
+        await tsunagu.rescanLocalMedia();
+        addToast({ kind: "success", title: `Imported ${imported.length} series`, body: [...new Set(imported)].join(", ") });
+        await load();
+      }
+      for (const err of errors) {
+        addToast({ kind: "error", title: "Import failed", body: `${err.path}: ${err.message}` });
+      }
+    } catch (e: any) {
+      addToast({ kind: "error", title: "Import failed", body: e?.message ?? String(e) });
+    } finally {
+      importing = false;
+      importProgress = null;
+    }
+  }
 
   async function load() {
     loading = true;
     try {
       if (isLocal) {
+        const entries = await tsunagu.library();
+        localItems = entries
+          .filter((e) => !e.source)
+          .map((e) => ({
+            id:            e.id,
+            title:         e.title,
+            thumbnailUrl:  e.thumbnailUrl ?? "",
+            unreadCount:   e.unreadCount,
+            downloadCount: e.downloadCount,
+            contentType:   e.contentType,
+            source:        null,
+          }));
         localPage    = 1;
-        localItems   = [];
         localHasNext = false;
       } else {
         const [entries, exts] = await Promise.all([
@@ -93,13 +163,50 @@
   async function loadMoreLocal() {
   }
 
-  async function searchLocal() {
+  function startRename(m: LibraryManga) {
+    renaming = { id: m.id, title: m.title, contentType: m.contentType ?? null };
+    renameInput = m.title;
+  }
+
+  async function confirmRename() {
+    if (!renaming) return;
+    const newTitle = renameInput.trim();
+    const oldTitle = renaming.title;
+    if (!newTitle || newTitle === oldTitle) { renaming = null; return; }
+    try {
+      if (!mediaDir) mediaDir = (await tsunagu.storageInfo()).mediaDir;
+      const { renameLocalSeries } = await import("$lib/core/localImport");
+      const kind = renaming.contentType === "ANIME" ? "anime" : renaming.contentType === "NOVEL" ? "novel" : "manga";
+      await renameLocalSeries(mediaDir, kind, oldTitle, newTitle);
+      await tsunagu.rescanLocalMedia();
+      renaming = null;
+      await load();
+    } catch (e: any) {
+      addToast({ kind: "error", title: "Rename failed", body: e?.message ?? String(e) });
+    }
+  }
+
+  function startDelete(m: LibraryManga) {
+    deleting = { id: m.id, title: m.title };
+  }
+
+  async function confirmDelete() {
+    if (!deleting) return;
+    deleteBusy = true;
+    try {
+      await tsunagu.deleteLocalSeries(deleting.id);
+      addToast({ kind: "success", title: "Deleted", body: deleting.title });
+      deleting = null;
+      await load();
+    } catch (e: any) {
+      addToast({ kind: "error", title: "Delete failed", body: e?.message ?? String(e) });
+    } finally {
+      deleteBusy = false;
+    }
   }
 
   function onSearchKeydown(e: KeyboardEvent) {
-    if (!isLocal) return;
-    if (e.key === 'Enter') searchLocal();
-    if (e.key === 'Escape') { searchInput = ''; search = ''; load(); }
+    if (e.key === 'Escape') { searchInput = ''; search = ''; }
   }
 
   function toggleFilter(f: ContentFilter) {
@@ -150,20 +257,14 @@
     </div>
     {#if !loading}
       <span class="count-badge">
-        {isLocal ? allManga.length + (localHasNext ? '+' : '') : `${filtered.length}${filtered.length !== allManga.length ? ` / ${allManga.length}` : ''}`}
+        {isLocal ? filtered.length + (localHasNext ? '+' : '') : `${filtered.length}${filtered.length !== allManga.length ? ` / ${allManga.length}` : ''}`}
       </span>
     {/if}
     <div class="header-right">
       <div class="search-wrap">
         <MagnifyingGlass size={12} class="search-icon" weight="light" />
         {#if isLocal}
-          <input
-            class="search"
-            placeholder="Coming soon…"
-            bind:value={searchInput}
-            autocomplete="off"
-            disabled
-          />
+          <input class="search" placeholder="Search" bind:value={searchInput} autocomplete="off" onkeydown={onSearchKeydown} />
         {:else}
           <input class="search" placeholder="Search" bind:value={search} autocomplete="off" />
         {/if}
@@ -215,6 +316,25 @@
     </div>
   </div>
 
+  {#if canImport}
+    <div class="drop-banner" class:drop-banner-active={dragOver}>
+      {#if importing}
+        <CircleNotch size={13} weight="light" class="anim-spin" />
+        {#if importProgress && importProgress.total > 0}
+          Importing… {importProgress.copied} / {importProgress.total} files
+          <div class="import-progress-track">
+            <div class="import-progress-fill" style="width:{Math.min(100, (importProgress.copied / importProgress.total) * 100)}%"></div>
+          </div>
+        {:else}
+          Importing…
+        {/if}
+      {:else}
+        <UploadSimple size={13} weight="bold" />
+        Drag manga, anime, or novel folders (or .cbz/.zip files) anywhere in this window to import them
+      {/if}
+    </div>
+  {/if}
+
   <div class="content">
     {#if loading}
       <div class="grid">
@@ -228,7 +348,9 @@
     {:else if filtered.length === 0}
       <div class="empty">
         {isLocal
-          ? 'Local sources aren\'t supported yet — coming in a future update.'
+          ? (allManga.length === 0
+              ? (canImport ? 'No local series yet — drag a manga, anime, or novel folder in to get started.' : 'No local series yet.')
+              : 'No matches.')
           : allManga.length === 0
             ? 'Nothing from this extension is in your library.'
             : 'No matches.'}
@@ -283,6 +405,24 @@
                   </div>
                 </div>
               {/if}
+              {#if canImport}
+                <div class="card-actions">
+                  <button
+                    class="rename-btn"
+                    title="Rename"
+                    onclick={(e) => { e.stopPropagation(); startRename(m as LibraryManga); }}
+                  >
+                    <PencilSimple size={11} weight="bold" />
+                  </button>
+                  <button
+                    class="rename-btn delete-btn"
+                    title="Delete"
+                    onclick={(e) => { e.stopPropagation(); startDelete(m as LibraryManga); }}
+                  >
+                    <Trash size={11} weight="bold" />
+                  </button>
+                </div>
+              {/if}
             </div>
             <p class="card-title">{m.title}</p>
           </button>
@@ -304,6 +444,38 @@
     {/if}
   </div>
 </div>
+
+{#if renaming}
+  <div class="backdrop" role="button" tabindex="-1" aria-label="Close" onclick={(e) => { if (e.target === e.currentTarget) renaming = null; }} onkeydown={(e) => e.key === 'Escape' && (renaming = null)}>
+    <div class="rename-modal" role="dialog" aria-label="Rename series">
+      <span class="rename-label">Rename series</span>
+      <input
+        class="rename-input"
+        bind:value={renameInput}
+        autofocus
+        onkeydown={(e) => { if (e.key === 'Enter') confirmRename(); if (e.key === 'Escape') renaming = null; }}
+      />
+      <div class="rename-actions">
+        <button class="rename-btn-cancel" onclick={() => renaming = null}>Cancel</button>
+        <button class="rename-btn-confirm" onclick={confirmRename}>Rename</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if deleting}
+  <div class="backdrop" role="button" tabindex="-1" aria-label="Close" onclick={(e) => { if (e.target === e.currentTarget && !deleteBusy) deleting = null; }} onkeydown={(e) => e.key === 'Escape' && !deleteBusy && (deleting = null)}>
+    <div class="rename-modal" role="dialog" aria-label="Delete series">
+      <span class="rename-label">Delete "{deleting.title}"? This permanently removes its files from disk and can't be undone.</span>
+      <div class="rename-actions">
+        <button class="rename-btn-cancel" onclick={() => deleting = null} disabled={deleteBusy}>Cancel</button>
+        <button class="rename-btn-confirm delete-confirm-btn" onclick={confirmDelete} disabled={deleteBusy}>
+          {deleteBusy ? 'Deleting…' : 'Delete'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if migrateTarget}
   <SourceMigrateModal
@@ -409,4 +581,81 @@
   .load-more-btn:disabled { opacity: 0.5; cursor: default; }
 
   @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+
+  .drop-banner {
+    display: flex; align-items: center; justify-content: center; gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-4);
+    font-family: var(--font-ui); font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
+    color: var(--text-faint);
+    background: var(--bg-raised);
+    border-bottom: 1px dashed var(--border-dim);
+    flex-shrink: 0;
+    transition: color var(--t-base), background var(--t-base), border-color var(--t-base);
+  }
+  .drop-banner-active {
+    color: var(--accent-fg);
+    background: var(--accent-muted);
+    border-color: var(--accent-dim);
+  }
+
+  .import-progress-track {
+    width: 120px; height: 4px; border-radius: 2px;
+    background: var(--bg-overlay); overflow: hidden;
+  }
+  .import-progress-fill {
+    height: 100%; background: var(--accent);
+    transition: width 0.15s ease;
+  }
+
+  .card-actions {
+    position: absolute; top: 6px; right: 6px; z-index: 3;
+    display: flex; gap: 4px;
+    opacity: 0; transition: opacity var(--t-base);
+  }
+  .card:hover .card-actions, .card:focus-visible .card-actions { opacity: 1; }
+
+  .rename-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: var(--radius-sm);
+    background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.18);
+    color: rgba(255,255,255,0.85); cursor: pointer;
+  }
+  .delete-btn:hover { background: var(--color-error); border-color: var(--color-error); color: #fff; }
+
+  .delete-confirm-btn { background: var(--color-error); border-color: var(--color-error); }
+  .delete-confirm-btn:disabled, .rename-btn-cancel:disabled { opacity: 0.5; cursor: default; }
+
+  .backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.72);
+    z-index: calc(var(--z-settings, 1000) + 2);
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+    animation: fadeIn 0.1s ease both;
+  }
+  .rename-modal {
+    width: min(320px, calc(100vw - 48px));
+    display: flex; flex-direction: column; gap: var(--sp-3);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-base); border-radius: var(--radius-lg);
+    padding: var(--sp-5);
+    box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+  }
+  .rename-label { font-family: var(--font-ui); font-size: var(--text-xs); letter-spacing: var(--tracking-wide); color: var(--text-secondary); }
+  .rename-input {
+    background: var(--bg-raised); border: 1px solid var(--border-dim); border-radius: var(--radius-md);
+    padding: 7px 10px; color: var(--text-primary); font-size: var(--text-sm); outline: none;
+    transition: border-color var(--t-base);
+  }
+  .rename-input:focus { border-color: var(--border-strong); }
+  .rename-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+  .rename-btn-cancel, .rename-btn-confirm {
+    padding: 6px 14px; border-radius: var(--radius-md);
+    font-family: var(--font-ui); font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
+    cursor: pointer; transition: opacity var(--t-base), background var(--t-base);
+  }
+  .rename-btn-cancel { background: var(--bg-raised); border: 1px solid var(--border-dim); color: var(--text-muted); }
+  .rename-btn-cancel:hover { color: var(--text-primary); }
+  .rename-btn-confirm { background: var(--accent); border: 1px solid var(--accent); color: var(--accent-contrast, #fff); }
+  .rename-btn-confirm:hover { opacity: 0.88; }
 </style>

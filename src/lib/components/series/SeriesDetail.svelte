@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack }      from 'svelte'
+  import { readPastTense } from '$lib/core/contentTypeLabels'
   import { goto }         from '$app/navigation'
   import SeriesHeader     from '$lib/components/series/SeriesHeader.svelte'
   import SeriesActions    from '$lib/components/series/SeriesActions.svelte'
@@ -168,6 +169,7 @@
       id: key,
       title: entry.title,
       thumbnailUrl: entry.thumbnailUrl ?? '',
+      hasCoverOverride: entry.hasCoverOverride,
       inLibrary: entry.inLibrary ?? false,
       contentType: entry.contentType,
       description: entry.description,
@@ -469,15 +471,17 @@
     const above = sortedChapters.slice(0, idx + 1)
     const below = sortedChapters.slice(idx)
     const last  = sortedChapters.length - 1
+    const done   = readPastTense(manga?.contentType)
+    const undone = `un${done}`
     const items: MenuEntry[] = [
-      { label: ch.read ? 'Mark as unread' : 'Mark as read', icon: ch.read ? Circle : CheckCircle, onClick: () => markRead(ch.id, !ch.read) },
+      { label: ch.read ? `Mark as ${undone}` : `Mark as ${done}`, icon: ch.read ? Circle : CheckCircle, onClick: () => markRead(ch.id, !ch.read) },
       { label: 'Select', icon: CheckSquare, onClick: () => { const next = new Set(selectedIds); next.add(ch.id); selectedIds = next } },
       { separator: true },
-      { label: 'Mark above as read',   icon: ArrowFatLinesUp,   onClick: () => markAboveRead(idx),   disabled: above.filter(c => !c.read).length === 0 },
-      { label: 'Mark above as unread', icon: ArrowFatLineUp,    onClick: () => markAboveUnread(idx), disabled: above.filter(c => c.read).length === 0 },
+      { label: `Mark above as ${done}`,   icon: ArrowFatLinesUp,   onClick: () => markAboveRead(idx),   disabled: above.filter(c => !c.read).length === 0 },
+      { label: `Mark above as ${undone}`, icon: ArrowFatLineUp,    onClick: () => markAboveUnread(idx), disabled: above.filter(c => c.read).length === 0 },
       { separator: true },
-      { label: 'Mark below as read',   icon: ArrowFatLinesDown, onClick: () => markBelowRead(idx),   disabled: idx === last || below.filter(c => !c.read).length === 0 },
-      { label: 'Mark below as unread', icon: ArrowFatLineDown,  onClick: () => markBelowUnread(idx), disabled: idx === last || below.filter(c => c.read).length === 0 },
+      { label: `Mark below as ${done}`,   icon: ArrowFatLinesDown, onClick: () => markBelowRead(idx),   disabled: idx === last || below.filter(c => !c.read).length === 0 },
+      { label: `Mark below as ${undone}`, icon: ArrowFatLineDown,  onClick: () => markBelowUnread(idx), disabled: idx === last || below.filter(c => c.read).length === 0 },
     ]
     if (!isLocal) {
       items.push(

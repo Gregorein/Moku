@@ -160,27 +160,11 @@
     }
   }
 
-  let rescanning = $state(false);
-
   async function loadLocalManga() {
     try {
       const found = await tsunagu.rescanLocalMedia();
       localMangaCount = String(found.length);
     } catch { localMangaCount = "0"; }
-  }
-
-  async function rescanLocal() {
-    if (rescanning) return;
-    rescanning = true;
-    try {
-      const found = await tsunagu.rescanLocalMedia();
-      localMangaCount = String(found.length);
-      const { loadLibrary } = await import("$lib/state/library.svelte");
-      await loadLibrary(true);
-      addToast({ kind: "success", title: "Local library rescanned", body: `${found.length} local ${found.length === 1 ? "title" : "titles"}` });
-    } catch (e) {
-      addToast({ kind: "error", title: "Rescan failed", body: String(e) });
-    } finally { rescanning = false; }
   }
 
   async function fetchFromRepo() {
@@ -394,7 +378,7 @@
     iconUrl={libraryTarget.iconUrl}
     {cropCovers} {statsAlways} {anims}
     sources={sourcesByPkg[libraryTarget.pkgName] ?? []}
-    onBack={() => libraryTarget = null}
+    onBack={() => { const wasLocal = libraryTarget?.pkgName === '__local__'; libraryTarget = null; if (wasLocal) loadLocalManga(); }}
     onSettings={() => { settingsTarget = { extensionName: libraryTarget!.extensionName, iconUrl: libraryTarget!.iconUrl, sources: sourcesByPkg[libraryTarget!.pkgName] ?? [] }; }}
   />
 {:else}
@@ -481,13 +465,13 @@
     {:else}
       <div class="list" bind:this={listEl} onscroll={onListScroll}>
         {#if showLocal}
-          <button type="button" class="local-row" onclick={rescanLocal} disabled={rescanning} title="Rescan {'{mediaDir}'}/local for hand-added files">
+          <button type="button" class="local-row" onclick={() => libraryTarget = { pkgName: '__local__', extensionName: 'Local Source', iconUrl: '' }} title="Open local source">
             <div class="local-icon">
-              {#if rescanning}<CircleNotch size={16} weight="light" class="anim-spin" />{:else}<HardDrives size={18} weight="bold" />{/if}
+              <HardDrives size={18} weight="bold" />
             </div>
             <div class="info">
               <span class="name">Local Source</span>
-              <span class="meta">Built-in · {localMangaCount} {localMangaCount === "1" ? "title" : "titles"} · tap to rescan</span>
+              <span class="meta">Built-in · {localMangaCount} {localMangaCount === "1" ? "title" : "titles"}</span>
             </div>
             <span class="local-badge">Built-in</span>
           </button>

@@ -44,6 +44,14 @@
     "discord-rpc:allow-set-activity",
     "discord-rpc:allow-clear-activity",
     "dialog:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "fs:default",
+    { "identifier": "fs:allow-read-dir", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-read-file", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-write-file", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-mkdir", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-copy-file", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-rename", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-exists", "allow": [{ "path": "**" }] }
   ]
 }

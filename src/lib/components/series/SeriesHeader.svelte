@@ -10,6 +10,7 @@
   import Thumbnail         from '$lib/components/shared/manga/Thumbnail.svelte'
   import ExtensionIcon     from '$lib/components/extensions/ExtensionIcon.svelte'
   import { resolvedCover } from '$lib/core/cover/coverResolver'
+  import { readPastTense } from '$lib/core/contentTypeLabels'
   import type { Manga, Chapter } from '$lib/types'
   import type { Folder } from '$lib/server-adapters/types'
 
@@ -193,7 +194,7 @@
   {#if totalCount > 0}
     <div class="progress-section">
       <div class="progress-header">
-        <span class="progress-label">{readCount} / {totalCount} read</span>
+        <span class="progress-label">{readCount} / {totalCount} {readPastTense(manga?.contentType)}</span>
         <span class="progress-pct">{Math.round(progressPct)}%</span>
       </div>
       <div class="progress-track"><div class="progress-fill" style="width:{progressPct}%"></div></div>
@@ -221,11 +222,9 @@
             <button class="detail-action-btn" class:detail-action-active={hasCoverOverride} onclick={onCoverPickerOpen}>
               <Image size={12} weight={hasCoverOverride ? 'fill' : 'light'} /> Cover Image
             </button>
-            {#if !isLocal}
-              <button class="detail-action-btn" class:detail-action-active={!!manga?.metadata} onclick={onMetadataOpen}>
-                <Database size={12} weight={manga?.metadata ? 'fill' : 'light'} /> Metadata
-              </button>
-            {/if}
+            <button class="detail-action-btn" class:detail-action-active={!!manga?.metadata} onclick={onMetadataOpen}>
+              <Database size={12} weight={manga?.metadata ? 'fill' : 'light'} /> Metadata
+            </button>
             {#if manga?.inLibrary && !isLocal}
               <button class="detail-action-btn" class:detail-action-active={hasAnyAutomation} onclick={onAutoOpen}>
                 <Gear size={12} weight={hasAnyAutomation ? 'fill' : 'light'} /> Automation
