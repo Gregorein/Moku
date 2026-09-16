@@ -31,7 +31,10 @@
     pageReady:        boolean;
     pageGroups:       number[][];
     currentGroup:     number[];
-    fadingOut:        boolean;
+    turning:          boolean;
+    turnDir:          1 | -1;
+    transition:       string;
+    rtl:              boolean;
     tapToToggleBar:   boolean;
     pinchZoomEnabled: boolean;
     useBlob:          boolean;
@@ -42,6 +45,7 @@
     onTap:            (e: MouseEvent) => void;
     onWheel:          (e: WheelEvent) => void;
     onToggleUi:       () => void;
+    onSwipe:          (forward: boolean) => void;
     bindContainer:    (el: HTMLDivElement) => void;
     onPageChange:     (page: number) => void;
     onChapterChange:  (chapterId: string) => void;
@@ -52,9 +56,9 @@
 
   const {
     style, imgCls, effectiveWidth, loading, error, pageReady,
-    pageGroups, currentGroup, fadingOut,
+    pageGroups, currentGroup, turning, turnDir, transition, rtl,
     tapToToggleBar, pinchZoomEnabled, useBlob, barPosition,
-    onGetZoom, onSetZoom, resolveUrl, onTap, onWheel, onToggleUi, bindContainer,
+    onGetZoom, onSetZoom, resolveUrl, onTap, onWheel, onToggleUi, onSwipe, bindContainer,
     onPageChange, onChapterChange, onCenterIdxChange, onMarkRead, onAppend,
   }: Props = $props();
 
@@ -261,15 +265,31 @@
     inspectDragging = false;
   }
 
+  const SWIPE_MIN_DIST = 50;
+
+  let swipeActive  = false;
+  let swipeStartX  = 0;
+  let swipeStartY  = 0;
+  let justSwiped   = false;
+
+  function swipeEligible(): boolean {
+    return style !== "longstrip" && readerState.inspectScale <= 1 && !pinch?.isPinching();
+  }
+
   export function onPointerDown(e: PointerEvent) {
     if (e.button !== 0) return;
     if ((e.target as Element).closest(".bar")) return;
     pinch?.onPointerDown(e);
-    if (style === "longstrip") stripRef?.onPointerDown(e);
+    if (style === "longstrip") { stripRef?.onPointerDown(e); return; }
+    if (swipeEligible() && readerState.inspectScale <= 1) {
+      swipeActive = true;
+      swipeStartX = e.clientX;
+      swipeStartY = e.clientY;
+    }
   }
 
   export function onPointerMove(e: PointerEvent) {
-    if (pinch?.isPinching()) { pinch.onPointerMove(e); return; }
+    if (pinch?.isPinching()) { pinch.onPointerMove(e); swipeActive = false; return; }
     if (style === "longstrip") { stripRef?.onPointerMove(e); return; }
     if (inspectDragging) {
       if (!inspectDragMoved && Math.abs(e.clientX - inspectDragStartX) + Math.abs(e.clientY - inspectDragStartY) > 4) inspectDragMoved = true;
@@ -284,8 +304,18 @@
   export function onPointerUp(e: PointerEvent) {
     pinch?.onPointerUp(e);
     if (!pinch?.isPinching()) {
-      if (style === "longstrip") stripRef?.onPointerUp();
-      else inspectDragging = false;
+      if (style === "longstrip") { stripRef?.onPointerUp(); return; }
+      inspectDragging = false;
+    }
+    if (swipeActive) {
+      swipeActive = false;
+      const dx = e.clientX - swipeStartX;
+      const dy = e.clientY - swipeStartY;
+      if (Math.abs(dx) >= SWIPE_MIN_DIST && Math.abs(dx) > Math.abs(dy)) {
+        const draggedLeft = dx < 0;
+        justSwiped = true;
+        onSwipe(rtl ? !draggedLeft : draggedLeft);
+      }
     }
   }
 
@@ -316,6 +346,7 @@
   let tapTimer: ReturnType<typeof setTimeout> | null = null;
 
   function handleTap(e: MouseEvent) {
+    if (justSwiped) { justSwiped = false; return; }
     if (style === "longstrip") {
       if (stripRef?.consumeTap()) return;
       return;
@@ -346,6 +377,7 @@
   use:setContainer
   class="viewer"
   class:strip={style === "longstrip"}
+  class:swipeable={style !== "longstrip"}
   class:inspect-active={readerState.inspectScale > 1}
   style={effectiveWidth != null ? `--effective-width:${effectiveWidth}px` : ""}
   role="presentation"
@@ -355,7 +387,7 @@
   ondblclick={handleDblClick}
   onscroll={style === "longstrip" ? handleScroll : undefined}
   onmousedown={onInspectMouseDown}
-  onpointerdown={pinchZoomEnabled ? onPointerDown : undefined}
+  onpointerdown={onPointerDown}
   onwheel={(e) => { if (e.ctrlKey || style !== "longstrip") e.preventDefault(); }}
   onkeydown={(e) => {
     if (e.key === " " && style === "longstrip") {
@@ -387,11 +419,18 @@
       {barPosition}
     />
 
-  {:else if style === "double" && pageReady}
-    <DoubleViewer {imgCls} {currentGroup} srcs={currentGroupSrcs} {pageGroups} />
-
   {:else if pageReady}
-    <SingleViewer {imgCls} src={currentSrc} {fadingOut} isFade={style === "fade"} />
+    <div
+      class="page-stage"
+      class:turning
+      style="--turn-x:{transition === 'slide' ? `${turnDir * 40}%` : '0'};--turn-deg:{transition === 'flip' ? `${turnDir * 70}deg` : '0deg'};--turn-op:{transition === 'none' ? 1 : (turning ? 0 : 1)};--turn-speed:{transition === 'fade' ? '0.1s' : '0.18s'}"
+    >
+      {#if style === "double"}
+        <DoubleViewer {imgCls} {currentGroup} srcs={currentGroupSrcs} {pageGroups} />
+      {:else}
+        <SingleViewer {imgCls} src={currentSrc} />
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -406,13 +445,24 @@
 {/snippet}
 
 <style>
-  .viewer { flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; -webkit-overflow-scrolling: touch; position: relative; touch-action: pan-x pan-y; zoom: calc(1 / var(--ui-zoom, 1)); }
+  .viewer { flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; -webkit-overflow-scrolling: touch; position: relative; touch-action: pan-x pan-y; zoom: calc(1 / var(--ui-zoom, 1)); user-select: none; -webkit-user-select: none; }
   .viewer.strip { justify-content: flex-start; padding: var(--sp-4) 0; }
   .viewer:focus { outline: none; }
   .viewer.inspect-active { cursor: grab; overflow: hidden; }
   .viewer.inspect-active:active { cursor: grabbing; }
 
+  .viewer.swipeable { touch-action: pan-y; }
   :global(.pinch-active) .viewer { touch-action: none; }
+
+  .page-stage {
+    display: flex;
+    perspective: 1200px;
+    transform: translateX(0) rotateY(0deg);
+    opacity: var(--turn-op, 1);
+    transition: transform var(--turn-speed, 0.18s) ease, opacity var(--turn-speed, 0.18s) ease;
+    will-change: transform, opacity;
+  }
+  .page-stage.turning { transform: translateX(var(--turn-x, 0)) rotateY(var(--turn-deg, 0deg)); }
 
   .page-loader { border-radius: var(--radius-sm); display: flex; align-items: stretch; }
   .page-loader-single {
@@ -444,7 +494,7 @@
     100% { stroke-dashoffset: -400; opacity: 0.25; }
   }
 
-  :global(.img) { display: block; user-select: none; image-rendering: auto; }
+  :global(.img) { display: block; user-select: none; -webkit-user-drag: none; image-rendering: auto; }
   :global(.img.optimize-contrast) { image-rendering: -webkit-optimize-contrast; }
   :global(.fit-width)    { max-width: var(--effective-width, 100%); width: 100%; height: auto; }
   :global(.fit-height)   { max-height: calc(var(--visual-vh, 100vh) - 80px); width: auto; max-width: var(--effective-width, 100%); height: auto; }

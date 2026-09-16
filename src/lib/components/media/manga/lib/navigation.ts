@@ -19,15 +19,19 @@ function advanceGroup(forward: boolean, adjacent: Adjacent, startAtLastPage: () 
   }
 }
 
-export async function animateFade(fn: () => void) {
-  readerState.fadingOut = true;
-  await new Promise(r => setTimeout(r, 100));
+export async function animateTurn(transition: string, dir: 1 | -1, fn: () => void) {
+  if (transition === "none" || !transition) { fn(); return; }
+  readerState.turnDir = dir;
+  readerState.turning = true;
+  await new Promise(r => setTimeout(r, transition === "fade" ? 100 : 160));
   fn();
-  readerState.fadingOut = false;
+  await new Promise(r => setTimeout(r, 20));
+  readerState.turning = false;
 }
 
 export function goForward(
   style: string,
+  transition: string,
   adjacent: Adjacent,
   lastPage: number,
   onMaybeMarkRead: () => void,
@@ -41,8 +45,7 @@ export function goForward(
   if (style === "double" && readerState.pageGroups.length) { advanceGroup(true, adjacent, startAtLastPage); return; }
   if (!readerState.pageUrls.length) return;
   if (readerState.pageNumber < lastPage) {
-    if (style === "fade") animateFade(() => { readerState.pageNumber++; });
-    else readerState.pageNumber++;
+    animateTurn(transition, 1, () => { readerState.pageNumber++; });
   } else if (adjacent.next) {
     onMaybeMarkRead();
     readerState.pageNumber = 1;
@@ -50,7 +53,7 @@ export function goForward(
   } else closeReader();
 }
 
-export function goBack(style: string, adjacent: Adjacent, startAtLastPage: () => void) {
+export function goBack(style: string, transition: string, adjacent: Adjacent, startAtLastPage: () => void) {
   if (readerState.loading) return;
   if (style === "longstrip") {
     if (adjacent.prev) { startAtLastPage(); openReader(adjacent.prev); }
@@ -59,8 +62,7 @@ export function goBack(style: string, adjacent: Adjacent, startAtLastPage: () =>
   if (style === "double" && readerState.pageGroups.length) { advanceGroup(false, adjacent, startAtLastPage); return; }
   if (!readerState.pageUrls.length) return;
   if (readerState.pageNumber > 1) {
-    if (style === "fade") animateFade(() => { readerState.pageNumber--; });
-    else readerState.pageNumber--;
+    animateTurn(transition, -1, () => { readerState.pageNumber--; });
   } else if (adjacent.prev) { startAtLastPage(); openReader(adjacent.prev); }
 }
 

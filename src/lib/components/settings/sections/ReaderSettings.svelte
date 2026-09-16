@@ -15,13 +15,16 @@
   let { selectOpen, closingSelect, toggleSelect, registerTrigger, getTrigger, selectPortal, anims }: Props = $props()
 
   let triggerPageStyle  = $state<HTMLButtonElement>(null!)
+  let triggerTransition = $state<HTMLButtonElement>(null!)
   let triggerReadingDir = $state<HTMLButtonElement>(null!)
   let triggerFitMode    = $state<HTMLButtonElement>(null!)
   let triggerBarPos     = $state<HTMLButtonElement>(null!)
 
   const BAR_POS_LABELS = { top: 'Top', left: 'Left', right: 'Right' } as const
+  const TRANSITION_LABELS = { none: 'None', fade: 'Fade', slide: 'Slide', flip: 'Swipe flip' } as const
 
   $effect(() => { if (triggerPageStyle)  registerTrigger('page-style',  triggerPageStyle)  })
+  $effect(() => { if (triggerTransition) registerTrigger('transition',  triggerTransition) })
   $effect(() => { if (triggerReadingDir) registerTrigger('reading-dir', triggerReadingDir) })
   $effect(() => { if (triggerFitMode)    registerTrigger('fit-mode',    triggerFitMode)    })
   $effect(() => { if (triggerBarPos)     registerTrigger('bar-pos',     triggerBarPos)     })
@@ -36,13 +39,29 @@
         <div class="s-row-info"><span class="s-label">Default layout</span><span class="s-desc">How chapters open by default</span></div>
         <div class="s-select">
           <button bind:this={triggerPageStyle} class="s-select-btn" onclick={() => toggleSelect('page-style')}>
-            <span>{{ 'single':'Single page','longstrip':'Long strip','fade':'Fade' }[settingsState.settings.pageStyle === 'double' ? 'single' : settingsState.settings.pageStyle]}</span>
+            <span>{{ 'single':'Single page','double':'Double page','auto':'Auto','longstrip':'Long strip' }[settingsState.settings.pageStyle]}</span>
             <svg class="s-select-caret" class:open={selectOpen === 'page-style'} width="10" height="6" viewBox="0 0 10 6"><path d="M0 0l5 6 5-6" fill="currentColor"/></svg>
           </button>
           {#if selectOpen === 'page-style' || closingSelect === 'page-style'}
             <div use:selectPortal={getTrigger('page-style')} class="s-select-menu" class:anims class:closing={closingSelect === 'page-style'}>
-              {#each [['single','Single page'],['longstrip','Long strip']] as [v, l]}
-                <button class="s-select-option" class:active={(settingsState.settings.pageStyle === 'double' ? 'single' : settingsState.settings.pageStyle) === v} onclick={() => { updateSettings({ pageStyle: v as Settings['pageStyle'] }); toggleSelect('page-style') }}>{l}</button>
+              {#each [['single','Single page'],['double','Double page'],['auto','Auto'],['longstrip','Long strip']] as [v, l]}
+                <button class="s-select-option" class:active={settingsState.settings.pageStyle === v} onclick={() => { updateSettings({ pageStyle: v as Settings['pageStyle'] }); toggleSelect('page-style') }}>{l}</button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </div>
+      <div class="s-row">
+        <div class="s-row-info"><span class="s-label">Transition</span><span class="s-desc">Animation played when changing pages, including via swipe</span></div>
+        <div class="s-select">
+          <button bind:this={triggerTransition} class="s-select-btn" onclick={() => toggleSelect('transition')}>
+            <span>{TRANSITION_LABELS[settingsState.settings.transition ?? 'none']}</span>
+            <svg class="s-select-caret" class:open={selectOpen === 'transition'} width="10" height="6" viewBox="0 0 10 6"><path d="M0 0l5 6 5-6" fill="currentColor"/></svg>
+          </button>
+          {#if selectOpen === 'transition' || closingSelect === 'transition'}
+            <div use:selectPortal={getTrigger('transition')} class="s-select-menu" class:anims class:closing={closingSelect === 'transition'}>
+              {#each [['none','None'],['fade','Fade'],['slide','Slide'],['flip','Swipe flip']] as [v, l]}
+                <button class="s-select-option" class:active={(settingsState.settings.transition ?? 'none') === v} onclick={() => { updateSettings({ transition: v as Settings['transition'] }); toggleSelect('transition') }}>{l}</button>
               {/each}
             </div>
           {/if}

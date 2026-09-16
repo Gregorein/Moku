@@ -1,7 +1,8 @@
 import { DEFAULT_KEYBINDS, type Keybinds } from '$lib/core/keybinds/defaultBinds'
 import type { LibrarySortOption, LibraryStatusFilter, LibraryContentFilter } from '$lib/state/library.svelte'
 
-export type PageStyle = 'single' | 'double' | 'longstrip' | 'fade'
+export type PageStyle = 'single' | 'double' | 'auto' | 'longstrip'
+export type PageTransition = 'none' | 'fade' | 'slide' | 'flip'
 export type FitMode = 'width' | 'height' | 'screen' | 'original'
 export type ReadingDirection = 'ltr' | 'rtl'
 export type ChapterSortDir = 'desc' | 'asc'
@@ -110,6 +111,7 @@ export const DEFAULT_MANGA_PREFS: MangaPrefs = {
 
 export interface ReaderSettings {
 	pageStyle: PageStyle
+	transition: PageTransition
 	fitMode: FitMode
 	readingDirection: ReadingDirection
 	readerZoom: number
@@ -127,6 +129,7 @@ export interface ReaderPreset {
 
 export interface Settings {
 	pageStyle: PageStyle
+	transition: PageTransition
 	readingDirection: ReadingDirection
 	fitMode: FitMode
 	readerZoom: number
@@ -231,6 +234,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	serverAuthUser: '',
 	serverAuthPass: '',
 	pageStyle: 'longstrip',
+	transition: 'none',
 	readingDirection: 'ltr',
 	fitMode: 'width',
 	readerZoom: 1.0,

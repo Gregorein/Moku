@@ -2,13 +2,11 @@
   import { readerState } from "$lib/state/mangaReader.svelte";
 
   interface Props {
-    imgCls:    string;
-    src:       string | null;
-    fadingOut: boolean;
-    isFade:    boolean;
+    imgCls: string;
+    src:    string | null;
   }
 
-  const { imgCls, src, fadingOut, isFade }: Props = $props();
+  const { imgCls, src }: Props = $props();
 </script>
 
 <div
@@ -22,7 +20,6 @@
       class={imgCls}
       decoding="async"
       draggable="false"
-      style={isFade ? `opacity:${fadingOut ? 0 : 1};transition:opacity 0.1s ease` : undefined}
     />
   {:else}
     <div class="page-loader page-loader-single" aria-hidden="true">{@render skeleton()}</div>

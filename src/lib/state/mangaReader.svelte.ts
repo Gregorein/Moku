@@ -5,8 +5,11 @@ import { seriesState } from "$lib/state/series.svelte";
 import { DEFAULT_MANGA_PREFS } from "$lib/types/settings";
 import { goto }                                          from "$app/navigation";
 
-export const PAGE_STYLES   = ["single", "fade", "double", "longstrip"] as const;
+export const PAGE_STYLES   = ["single", "double", "auto", "longstrip"] as const;
 export type  PageStyle     = typeof PAGE_STYLES[number];
+
+export const TRANSITIONS   = ["none", "fade", "slide", "flip"] as const;
+export type  PageTransition = typeof TRANSITIONS[number];
 
 export const ZOOM_STEP = 0.05;
 export const ZOOM_MIN  = 0.1;
@@ -49,7 +52,8 @@ class ReaderState {
   nextN            = $state(5);
   dlBusy           = $state(false);
 
-  fadingOut        = $state(false);
+  turning          = $state(false);
+  turnDir          = $state<1 | -1>(1);
   sliderDragging   = $state(false);
   sliderHover      = $state(false);
 
@@ -64,6 +68,7 @@ class ReaderState {
   inspectPanY      = $state(0);
 
   containerWidth   = $state(0);
+  containerHeight  = $state(0);
 
   readonly activeChapterList = $derived(seriesState.readerChapterList);
 
@@ -88,7 +93,7 @@ class ReaderState {
     this.pageGroups       = [];
     this.stripChapters    = [];
     this.visibleChapterId = null;
-    this.fadingOut        = false;
+    this.turning           = false;
   }
 
   resetResume() {

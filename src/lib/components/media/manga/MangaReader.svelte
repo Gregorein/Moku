@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack, tick }        from "svelte";
-  import { readerState, PAGE_STYLES }      from "$lib/state/mangaReader.svelte";
+  import { readerState, PAGE_STYLES, TRANSITIONS }      from "$lib/state/mangaReader.svelte";
   import type { PageStyle }                              from "$lib/state/mangaReader.svelte";
   import { settingsState, updateSettings } from "$lib/state/settings.svelte";
   import { app, appState }                 from "$lib/state/app.svelte";
@@ -33,7 +33,10 @@
 
   const rtl            = $derived(effectiveReaderSettings.readingDirection === "rtl");
   const fit            = $derived((effectiveReaderSettings.fitMode ?? "width") as ReaderSettings["fitMode"]);
-  const style          = $derived((effectiveReaderSettings.pageStyle ?? "single") as typeof PAGE_STYLES[number]);
+  const rawStyle       = $derived((effectiveReaderSettings.pageStyle ?? "single") as typeof PAGE_STYLES[number]);
+  const wideContainer  = $derived(readerState.containerWidth > 0 && readerState.containerHeight > 0 && readerState.containerWidth / readerState.containerHeight > 1.25);
+  const style          = $derived(rawStyle === "auto" ? (wideContainer ? "double" : "single") : rawStyle);
+  const transition     = $derived((effectiveReaderSettings.transition ?? "none") as typeof TRANSITIONS[number]);
   const zoom           = $derived(effectiveReaderSettings.readerZoom ?? 1.0);
   const markOnNext     = $derived(settingsState.settings.markReadOnNext ?? true);
   const tapToToggleBar = $derived(settingsState.settings.tapToToggleBar ?? false);
@@ -198,11 +201,15 @@
   }
 
   const goNext = $derived(rtl
-    ? () => goBack(style, adjacent, startAtLast)
-    : () => goForward(style, adjacent, lastPage, maybeMarkCurrentRead, startAtLast));
+    ? () => goBack(style, transition, adjacent, startAtLast)
+    : () => goForward(style, transition, adjacent, lastPage, maybeMarkCurrentRead, startAtLast));
   const goPrev = $derived(rtl
-    ? () => goForward(style, adjacent, lastPage, maybeMarkCurrentRead, startAtLast)
-    : () => goBack(style, adjacent, startAtLast));
+    ? () => goForward(style, transition, adjacent, lastPage, maybeMarkCurrentRead, startAtLast)
+    : () => goBack(style, transition, adjacent, startAtLast));
+
+  function handleSwipe(forward: boolean) {
+    if (forward) goNext(); else goPrev();
+  }
 
   function handleCloseReader() {
     for (const url of readerState.pageUrls) revokeBlobUrl(url);
@@ -217,7 +224,7 @@
     lastPage:         () => lastPage,
     adjustZoom:       (d) => { captureZoomAnchor(containerEl, style, zoomAnchor); applySettings({ readerZoom: clampZoom(zoom + d) }); restoreZoomAnchor(containerEl, zoomAnchor); },
     resetZoom:        () => { captureZoomAnchor(containerEl, style, zoomAnchor); applySettings({ readerZoom: 1.0 }); restoreZoomAnchor(containerEl, zoomAnchor); },
-    cycleStyle:       () => { const idx = PAGE_STYLES.indexOf(style); applySettings({ pageStyle: PAGE_STYLES[(idx + 1) % PAGE_STYLES.length] as PageStyle }); },
+    cycleStyle:       () => { const idx = PAGE_STYLES.indexOf(rawStyle); applySettings({ pageStyle: PAGE_STYLES[(idx + 1) % PAGE_STYLES.length] as PageStyle }); },
     toggleDirection:  () => applySettings({ readingDirection: rtl ? "ltr" : "rtl" }),
     openSettings:     () => { app.setSettingsOpen(true); },
     toggleBookmark:   () => toggleBookmark(displayChapter, readerState.pageNumber),
@@ -238,7 +245,8 @@
 
   function captureCurrentReaderSettings(): ReaderSettings {
     return {
-      pageStyle:           style as PageStyle,
+      pageStyle:           rawStyle as PageStyle,
+      transition,
       fitMode:             fit,
       readingDirection:    (settingsState.settings.readingDirection ?? "ltr") as ReaderSettings["readingDirection"],
       readerZoom:          zoom,
@@ -469,8 +477,9 @@
     let roTimer: ReturnType<typeof setTimeout> | null = null;
     const ro = new ResizeObserver(entries => {
       const w = entries[0].contentRect.width;
+      const h = entries[0].contentRect.height;
       if (roTimer) clearTimeout(roTimer);
-      roTimer = setTimeout(() => { readerState.containerWidth = w; roTimer = null; }, 50);
+      roTimer = setTimeout(() => { readerState.containerWidth = w; readerState.containerHeight = h; roTimer = null; }, 50);
     });
     if (containerEl) ro.observe(containerEl);
 
@@ -532,7 +541,7 @@
 
   {#if readerState.presetOpen}
     <ReaderPresetPanel
-      {fit} {style} {rtl} {zoom} {zoomPct}
+      {fit} {style} {rawStyle} {transition} {rtl} {zoom} {zoomPct}
       {perMangaEnabled}
       {barPosition}
       onTogglePerManga={handleTogglePerManga}
@@ -564,7 +573,10 @@
     pageReady={readerState.pageReady}
     pageGroups={readerState.pageGroups}
     {currentGroup}
-    fadingOut={readerState.fadingOut}
+    turning={readerState.turning}
+    turnDir={readerState.turnDir}
+    {transition}
+    {rtl}
     {tapToToggleBar}
     {pinchZoomEnabled}
     {useBlob}
@@ -575,6 +587,7 @@
     onTap={handleTap}
     onWheel={handleWheel}
     onToggleUi={toggleUiVisibility}
+    onSwipe={handleSwipe}
     {bindContainer}
     onPageChange={(p) => { readerState.pageNumber = p; }}
     onChapterChange={(id) => { visibleChapterId = id; }}

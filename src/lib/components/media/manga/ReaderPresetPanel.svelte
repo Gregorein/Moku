@@ -1,18 +1,20 @@
 <script lang="ts">
   import {
     X, Check, Trash, PencilSimple,
-    Square, Rows, BookOpen, MonitorPlay,
+    Square, Rows, BookOpen, MonitorPlay, Sparkle, Prohibit,
     ArrowsLeftRight, ArrowsIn, ArrowsOut, ArrowsVertical, ArrowsHorizontal,
   } from "phosphor-svelte";
   import type { ReaderSettings, ReaderPreset } from "$lib/state/mangaReader.svelte";
   import type { FitMode }                      from "$lib/types/settings";
   import { settingsState, updateSettings }     from "$lib/state/settings.svelte";
-  import { readerState, PAGE_STYLES, ZOOM_MIN, ZOOM_MAX } from "$lib/state/mangaReader.svelte";
+  import { readerState, PAGE_STYLES, TRANSITIONS, ZOOM_MIN, ZOOM_MAX } from "$lib/state/mangaReader.svelte";
   import MediaSettingsPanel from "$lib/components/media/shared/MediaSettingsPanel.svelte";
 
   interface Props {
     fit:                  FitMode;
     style:                string;
+    rawStyle:              string;
+    transition:           string;
     rtl:                  boolean;
     zoom:                 number;
     zoomPct:              number;
@@ -30,7 +32,7 @@
   }
 
   const {
-    fit, style, rtl, zoom, zoomPct,
+    fit, style, rawStyle, transition, rtl, zoom, zoomPct,
     perMangaEnabled, onTogglePerManga,
     onSavePreset, onApplyPreset, onUpdatePreset, onDeletePreset,
     onApplySettings,
@@ -94,8 +96,15 @@
   const styleOptions: { value: string; label: string; icon: any }[] = [
     { value: "single",    label: "Single",  icon: Square },
     { value: "double",    label: "Double",  icon: BookOpen },
-    { value: "fade",      label: "Fade",    icon: MonitorPlay },
+    { value: "auto",      label: "Auto",    icon: Sparkle },
     { value: "longstrip", label: "Strip",   icon: Rows },
+  ];
+
+  const transitionOptions: { value: string; label: string; icon: any }[] = [
+    { value: "none",  label: "None",  icon: Prohibit },
+    { value: "fade",  label: "Fade",  icon: MonitorPlay },
+    { value: "slide", label: "Slide", icon: ArrowsHorizontal },
+    { value: "flip",  label: "Flip",  icon: ArrowsLeftRight },
   ];
 
   const autoScroll = $derived(settingsState.settings.autoScroll ?? false);
@@ -112,9 +121,9 @@
     <div class="msp-tiles">
       {#each styleOptions as o}
         {@const Icon = o.icon}
-        <button class="msp-tile" class:on={style === o.value}
+        <button class="msp-tile" class:on={rawStyle === o.value}
           onclick={() => onApplySettings({ pageStyle: o.value as typeof PAGE_STYLES[number] })}>
-          <Icon size={17} weight={style === o.value ? "fill" : "light"} />
+          <Icon size={17} weight={rawStyle === o.value ? "fill" : "light"} />
           <span class="msp-tile-label">{o.label}</span>
         </button>
       {/each}
@@ -161,6 +170,20 @@
         </div>
       {/if}
     {/if}
+  </div>
+
+  <div class="msp-group">
+    <p class="msp-label">Transition</p>
+    <div class="msp-tiles">
+      {#each transitionOptions as o}
+        {@const Icon = o.icon}
+        <button class="msp-tile" class:on={transition === o.value}
+          onclick={() => onApplySettings({ transition: o.value as typeof TRANSITIONS[number] })}>
+          <Icon size={17} weight={transition === o.value ? "fill" : "light"} />
+          <span class="msp-tile-label">{o.label}</span>
+        </button>
+      {/each}
+    </div>
   </div>
 
   <div class="msp-group">
