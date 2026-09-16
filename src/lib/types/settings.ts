@@ -242,7 +242,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	autoNextChapter: true,
 	libraryCropCovers: true,
 	libraryPageSize: 48,
-	contentLevel: 'strict',
+	contentLevel: 'moderate',
 	sourceOverridesEnabled: false,
 	nsfwAllowedSourceIds: [],
 	nsfwBlockedSourceIds: [],
