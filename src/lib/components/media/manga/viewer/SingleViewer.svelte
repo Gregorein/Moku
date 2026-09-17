@@ -1,12 +1,15 @@
 <script lang="ts">
   import { readerState } from "$lib/state/mangaReader.svelte";
+  import type { PeelGeometry } from "$lib/components/media/manga/lib/pagePeel";
 
   interface Props {
-    imgCls: string;
-    src:    string | null;
+    imgCls:       string;
+    src:          string | null;
+    incomingSrc?: string | null;
+    peel?:        PeelGeometry | null;
   }
 
-  const { imgCls, src }: Props = $props();
+  const { imgCls, src, incomingSrc = null, peel = null }: Props = $props();
 </script>
 
 <div
@@ -14,13 +17,60 @@
   style="transform:scale({readerState.inspectScale}) translate({readerState.inspectPanX / readerState.inspectScale}px,{readerState.inspectPanY / readerState.inspectScale}px)"
 >
   {#if src}
-    <img
-      {src}
-      alt="Page {readerState.pageNumber}"
-      class={imgCls}
-      decoding="async"
-      draggable="false"
-    />
+    <div class="peel-stack" class:peeling={!!peel}>
+      {#if peel && incomingSrc}
+        <img
+          class="peel-under"
+          src={incomingSrc}
+          alt=""
+          draggable="false"
+          decoding="async"
+        />
+        <svg class="peel-page-shadow" viewBox="0 0 {peel.boxW} {peel.boxH}" preserveAspectRatio="none" style:clip-path={peel.holeClip} aria-hidden="true">
+          <defs>
+            <linearGradient id="peel-page-shade" gradientUnits="userSpaceOnUse"
+              x1={peel.creaseX} y1={peel.creaseY} x2={peel.pageShadeToX} y2={peel.pageShadeToY}>
+              <stop offset="0" stop-color="#000" stop-opacity="0.46"/>
+              <stop offset="0.45" stop-color="#000" stop-opacity="0.14"/>
+              <stop offset="1" stop-color="#000" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#peel-page-shade)"/>
+        </svg>
+      {/if}
+      <img
+        {src}
+        alt="Page {readerState.pageNumber}"
+        class="peel-front {imgCls}"
+        decoding="async"
+        draggable="false"
+        style:clip-path={peel?.outgoingClip ?? "none"}
+      />
+      {#if peel && peel.creaseLength > 4}
+        <div class="peel-flap-wrap" style:clip-path={peel.flapClip}>
+          <img
+            class="peel-flap-img"
+            {src}
+            alt=""
+            draggable="false"
+            decoding="async"
+            style:transform={peel.flapTransform}
+          />
+          <div class="peel-flap-paper"></div>
+          <svg class="peel-flap-shadow" viewBox="0 0 {peel.boxW} {peel.boxH}" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="peel-flap-shade" gradientUnits="userSpaceOnUse"
+                x1={peel.creaseX} y1={peel.creaseY} x2={peel.flapShadeToX} y2={peel.flapShadeToY}>
+                <stop offset="0" stop-color="#000" stop-opacity="0.62"/>
+                <stop offset="0.4" stop-color="#000" stop-opacity="0.34"/>
+                <stop offset="1" stop-color="#000" stop-opacity="0.16"/>
+              </linearGradient>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#peel-flap-shade)"/>
+          </svg>
+        </div>
+      {/if}
+    </div>
   {:else}
     <div class="page-loader page-loader-single" aria-hidden="true">{@render skeleton()}</div>
   {/if}
@@ -38,6 +88,55 @@
 
 <style>
   .inspect-wrap { display: flex; align-items: center; justify-content: center; transform-origin: center center; will-change: transform; }
+
+  .peel-stack { position: relative; display: flex; align-items: center; justify-content: center; }
+  .peel-stack.peeling { overflow: hidden; }
+
+  .peel-front { position: relative; z-index: 2; }
+
+  .peel-under {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+    pointer-events: none;
+  }
+
+  .peel-page-shadow, .peel-flap-shadow {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  .peel-page-shadow { z-index: 1; }
+
+  .peel-flap-wrap {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .peel-flap-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+    transform-origin: 0 0;
+    filter: brightness(1.14) contrast(0.9) saturate(0.55);
+  }
+
+  .peel-flap-paper {
+    position: absolute;
+    inset: 0;
+    background: rgba(248, 244, 236, 0.52);
+  }
 
   .page-loader { border-radius: var(--radius-sm); display: flex; align-items: stretch; }
   .page-loader-single {

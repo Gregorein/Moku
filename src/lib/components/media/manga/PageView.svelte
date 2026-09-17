@@ -7,6 +7,10 @@
   import LongstripViewer        from "$lib/components/media/manga/viewer/LongstripViewer.svelte";
   import SingleViewer           from "$lib/components/media/manga/viewer/SingleViewer.svelte";
   import DoubleViewer           from "$lib/components/media/manga/viewer/DoubleViewer.svelte";
+  import {
+    type PeelGeometry,
+    PEEL_MS, peelGeometry, peelCorner, easeOutCubic,
+  } from "$lib/components/media/manga/lib/pagePeel";
 
   export interface StripChapter {
     chapterId:   string;
@@ -98,16 +102,21 @@
 
   let currentSrc       = $state<string | null>(null);
   let currentGroupSrcs = $state<(string | null)[]>([]);
+  let srcPage          = 0;
+  let srcUrl           = "";
+  let incomingPeelSrc  = $state<string | null>(null);
+  let peelGeom         = $state<PeelGeometry | null>(null);
+  let peelRaf          = 0;
+  let peelWait         = null as (() => void) | null;
 
   $effect(() => {
     if (style === "longstrip" || !pageReady) return;
     const pageNum = readerState.pageNumber;
     const urls    = readerState.pageUrls;
     const group   = currentGroup;
-    currentSrc       = null;
-    currentGroupSrcs = group.map(() => null);
     let cancelled = false;
     if (style === "double") {
+      currentGroupSrcs = group.map(() => null);
       group.forEach((pg, i) => {
         const url = urls[pg - 1];
         if (!url) return;
@@ -118,10 +127,134 @@
       });
     } else {
       const url = urls[pageNum - 1];
-      if (url) resolveUrl(url, 999).then(src => { if (!cancelled) currentSrc = src; });
+      if (!url) { currentSrc = null; srcPage = 0; srcUrl = ""; return; }
+      if (srcPage === pageNum && srcUrl === url && currentSrc) return;
+      currentSrc = null;
+      srcPage = 0;
+      resolveUrl(url, 999).then(src => {
+        if (cancelled) return;
+        currentSrc = src;
+        srcPage = pageNum;
+        srcUrl = url;
+      });
     }
     return () => { cancelled = true; };
   });
+
+  $effect(() => {
+    if (style === "longstrip" || !currentSrc) return;
+    const n    = readerState.pageNumber;
+    const urls = readerState.pageUrls;
+    for (const url of [urls[n], urls[n - 2]]) {
+      if (!url) continue;
+      const img = new Image();
+      img.src = url;
+    }
+  });
+
+  $effect(() => {
+    void readerState.activeChapter?.id;
+    return () => {
+      if (peelRaf) cancelAnimationFrame(peelRaf);
+      peelRaf = 0;
+      peelWait?.();
+      peelWait = null;
+      peelGeom = null;
+      incomingPeelSrc = null;
+    };
+  });
+
+  function waitDecoded(src: string): Promise<void> {
+    const img = new Image();
+    img.src = src;
+    if (typeof img.decode === "function") {
+      return img.decode().catch(() => {});
+    }
+    return new Promise(resolve => {
+      img.onload = () => resolve();
+      img.onerror = () => resolve();
+    });
+  }
+
+  function measureOutgoing(): { w: number; h: number } | null {
+    const img = containerEl?.querySelector<HTMLElement>(".peel-stack > img.peel-front");
+    if (!img) return null;
+    const w = img.offsetWidth;
+    const h = img.offsetHeight;
+    if (w < 8 || h < 8) return null;
+    return { w, h };
+  }
+
+  function runPeelAnim(corner: ReturnType<typeof peelCorner>, w: number, h: number): Promise<void> {
+    return new Promise(resolve => {
+      const t0 = performance.now();
+      peelWait = resolve;
+      const frame = (now: number) => {
+        const t = Math.min(1, (now - t0) / PEEL_MS);
+        peelGeom = peelGeometry(corner, easeOutCubic(t), w, h);
+        if (t < 1) {
+          peelRaf = requestAnimationFrame(frame);
+          return;
+        }
+        peelRaf = 0;
+        peelWait = null;
+        resolve();
+      };
+      peelRaf = requestAnimationFrame(frame);
+    });
+  }
+
+  /** Auto corner-peel. Commits pageNumber after the outgoing layer is gone. Returns false to fall back to an instant swap. */
+  export async function playPeel(dir: 1 | -1): Promise<boolean> {
+    if (style !== "single" && style !== "auto") return false;
+    if (readerState.turning) return false;
+    if (readerState.inspectScale > 1) return false;
+    if (!currentSrc || !pageReady) return false;
+
+    const from = readerState.pageNumber;
+    const to   = from + dir;
+    const urls = readerState.pageUrls;
+    const url  = urls[to - 1];
+    if (!url) return false;
+
+    const chapterId = readerState.activeChapter?.id;
+    const box = measureOutgoing();
+    if (!box) return false;
+
+    readerState.turnDir = dir;
+    readerState.turning = true;
+
+    try {
+      const incoming = await resolveUrl(url, 999);
+      await waitDecoded(incoming);
+      if (readerState.activeChapter?.id !== chapterId) return false;
+      if (readerState.pageNumber !== from) return false;
+
+      incomingPeelSrc = incoming;
+      const corner = peelCorner(dir, rtl);
+      peelGeom = peelGeometry(corner, 0, box.w, box.h);
+      await runPeelAnim(corner, box.w, box.h);
+      if (readerState.activeChapter?.id !== chapterId) return false;
+
+      currentSrc = incoming;
+      srcPage = to;
+      srcUrl = url;
+      incomingPeelSrc = null;
+      peelGeom = null;
+      readerState.pageNumber = to;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (peelRaf) cancelAnimationFrame(peelRaf);
+      peelRaf = 0;
+      peelWait?.();
+      peelWait = null;
+      incomingPeelSrc = null;
+      peelGeom = null;
+      readerState.turning = false;
+    }
+  }
 
   $effect(() => {
     void readerState.pageNumber;
@@ -197,6 +330,7 @@
     if (!containerEl) return null;
     return (
       containerEl.querySelector<HTMLElement>(".inspect-wrap .double-wrap") ??
+      containerEl.querySelector<HTMLElement>(".peel-stack > img.peel-front") ??
       containerEl.querySelector<HTMLElement>(".inspect-wrap img")
     );
   }
@@ -422,13 +556,13 @@
   {:else if pageReady}
     <div
       class="page-stage"
-      class:turning
-      style="--turn-x:{transition === 'slide' ? `${turnDir * 40}%` : '0'};--turn-deg:{transition === 'flip' ? `${turnDir * 70}deg` : '0deg'};--turn-op:{transition === 'none' ? 1 : (turning ? 0 : 1)};--turn-speed:{transition === 'fade' ? '0.1s' : '0.18s'}"
+      class:turning={turning && transition !== "flip"}
+      style="--turn-x:{transition === 'slide' ? `${turnDir * 40}%` : '0'};--turn-deg:0deg;--turn-op:{transition === 'none' || transition === 'flip' ? 1 : (turning ? 0 : 1)};--turn-speed:{transition === 'fade' ? '0.1s' : '0.18s'}"
     >
       {#if style === "double"}
         <DoubleViewer {imgCls} {currentGroup} srcs={currentGroupSrcs} {pageGroups} />
       {:else}
-        <SingleViewer {imgCls} src={currentSrc} />
+        <SingleViewer {imgCls} src={currentSrc} incomingSrc={incomingPeelSrc} peel={peelGeom} />
       {/if}
     </div>
   {/if}

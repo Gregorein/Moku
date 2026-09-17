@@ -6,6 +6,8 @@ interface Adjacent {
   next: Chapter | null;
 }
 
+export type PlayPeel = (dir: 1 | -1) => Promise<boolean>;
+
 function advanceGroup(forward: boolean, adjacent: Adjacent, startAtLastPage: () => void) {
   if (!readerState.pageGroups.length) return;
   const gi = readerState.pageGroups.findIndex(g => g.includes(readerState.pageNumber));
@@ -21,12 +23,24 @@ function advanceGroup(forward: boolean, adjacent: Adjacent, startAtLastPage: () 
 
 export async function animateTurn(transition: string, dir: 1 | -1, fn: () => void) {
   if (transition === "none" || !transition) { fn(); return; }
+  if (readerState.turning) return;
   readerState.turnDir = dir;
   readerState.turning = true;
   await new Promise(r => setTimeout(r, transition === "fade" ? 100 : 160));
   fn();
   await new Promise(r => setTimeout(r, 20));
   readerState.turning = false;
+}
+
+async function tryPeel(
+  dir: 1 | -1,
+  playPeel: PlayPeel | undefined,
+  fallback: () => void,
+) {
+  if (!playPeel) { fallback(); return; }
+  const from = readerState.pageNumber;
+  const ok = await playPeel(dir);
+  if (!ok && readerState.pageNumber === from && !readerState.turning) fallback();
 }
 
 export function goForward(
@@ -36,8 +50,10 @@ export function goForward(
   lastPage: number,
   onMaybeMarkRead: () => void,
   startAtLastPage: () => void,
+  playPeel?: PlayPeel,
 ) {
   if (readerState.loading) return;
+  if (readerState.turning) return;
   if (style === "longstrip") {
     if (adjacent.next) { onMaybeMarkRead(); openReader(adjacent.next); }
     return;
@@ -45,6 +61,10 @@ export function goForward(
   if (style === "double" && readerState.pageGroups.length) { advanceGroup(true, adjacent, startAtLastPage); return; }
   if (!readerState.pageUrls.length) return;
   if (readerState.pageNumber < lastPage) {
+    if (transition === "flip") {
+      void tryPeel(1, playPeel, () => { readerState.pageNumber++; });
+      return;
+    }
     animateTurn(transition, 1, () => { readerState.pageNumber++; });
   } else if (adjacent.next) {
     onMaybeMarkRead();
@@ -53,8 +73,9 @@ export function goForward(
   } else closeReader();
 }
 
-export function goBack(style: string, transition: string, adjacent: Adjacent, startAtLastPage: () => void) {
+export function goBack(style: string, transition: string, adjacent: Adjacent, startAtLastPage: () => void, playPeel?: PlayPeel) {
   if (readerState.loading) return;
+  if (readerState.turning) return;
   if (style === "longstrip") {
     if (adjacent.prev) { startAtLastPage(); openReader(adjacent.prev); }
     return;
@@ -62,6 +83,10 @@ export function goBack(style: string, transition: string, adjacent: Adjacent, st
   if (style === "double" && readerState.pageGroups.length) { advanceGroup(false, adjacent, startAtLastPage); return; }
   if (!readerState.pageUrls.length) return;
   if (readerState.pageNumber > 1) {
+    if (transition === "flip") {
+      void tryPeel(-1, playPeel, () => { readerState.pageNumber--; });
+      return;
+    }
     animateTurn(transition, -1, () => { readerState.pageNumber--; });
   } else if (adjacent.prev) { startAtLastPage(); openReader(adjacent.prev); }
 }

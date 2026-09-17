@@ -104,7 +104,7 @@
     { value: "none",  label: "None",  icon: Prohibit },
     { value: "fade",  label: "Fade",  icon: MonitorPlay },
     { value: "slide", label: "Slide", icon: ArrowsHorizontal },
-    { value: "flip",  label: "Flip",  icon: ArrowsLeftRight },
+    { value: "flip",  label: "Turn",  icon: ArrowsLeftRight },
   ];
 
   const autoScroll = $derived(settingsState.settings.autoScroll ?? false);
@@ -184,6 +184,11 @@
         </button>
       {/each}
     </div>
+    {#if style === "longstrip"}
+      <p class="msp-hint">Turn peels a single page. Strip ignores it.</p>
+    {:else if style === "double"}
+      <p class="msp-hint">Double-page flip is next. Turn is a no-op here for now.</p>
+    {/if}
   </div>
 
   <div class="msp-group">
@@ -315,6 +320,13 @@
 </MediaSettingsPanel>
 
 <style>
+  .msp-hint {
+    margin: 8px 0 0;
+    font-family: var(--font-ui);
+    font-size: var(--text-2xs);
+    color: var(--text-faint);
+    letter-spacing: var(--tracking-wide);
+  }
   .msp-seg-btn { display: flex; align-items: center; justify-content: center; gap: 5px; }
 
   .rp-new {
