@@ -186,8 +186,6 @@
     </div>
     {#if style === "longstrip"}
       <p class="msp-hint">Turn peels a single page. Strip ignores it.</p>
-    {:else if style === "double"}
-      <p class="msp-hint">Double-page flip is next. Turn is a no-op here for now.</p>
     {/if}
   </div>
 

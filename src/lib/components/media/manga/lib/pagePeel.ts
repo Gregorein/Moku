@@ -17,6 +17,10 @@ export interface PeelGeometry {
 }
 
 export const PEEL_MS = 500;
+export const FLIP_MS = 560;
+
+/** `full` folds the whole box (single page). `left`/`right` stop the crease at the spine. */
+export type FoldHalf = "full" | "left" | "right";
 
 type Pt = [number, number];
 
@@ -43,12 +47,18 @@ function pullUnit(corner: PeelCorner, t: number): Pt {
   return [Math.cos(a), Math.sin(a)];
 }
 
-function sClear(C: Pt, u: Pt, w: number, h: number): number {
+function foldVerts(w: number, h: number, fold: FoldHalf): Pt[] {
+  if (fold === "right") return [[w / 2, 0], [w, 0], [w, h], [w / 2, h]];
+  if (fold === "left")  return [[0, 0], [w / 2, 0], [w / 2, h], [0, h]];
+  return rectVerts(w, h);
+}
+
+function sClear(C: Pt, u: Pt, verts: Pt[], pad: number): number {
   let m = 0;
-  for (const V of rectVerts(w, h)) {
+  for (const V of verts) {
     m = Math.max(m, 2 * dot(sub(V, C), u));
   }
-  return m + 8;
+  return m + pad;
 }
 
 function poly(points: Pt[]): string {
@@ -141,13 +151,20 @@ function emptyGeom(): PeelGeometry {
   };
 }
 
-export function peelGeometry(corner: PeelCorner, t: number, w: number, h: number): PeelGeometry {
+export function peelGeometry(
+  corner: PeelCorner,
+  t: number,
+  w: number,
+  h: number,
+  fold: FoldHalf = "full",
+): PeelGeometry {
   const progress = Math.max(0, Math.min(1, t));
   if (w < 8 || h < 8 || progress <= 0.002) return emptyGeom();
 
   const C = CORNER[corner](w, h);
   const u = pullUnit(corner, progress);
-  const s = progress * sClear(C, u, w, h);
+  // Half folds must stop on the spine. The +8 single-page pad would land the verso ~8px off the gutter.
+  const s = progress * sClear(C, u, foldVerts(w, h, fold), fold === "full" ? 8 : 0);
   if (s <= 0.5) return emptyGeom();
 
   const P: Pt = [C[0] + u[0] * s, C[1] + u[1] * s];
@@ -212,4 +229,18 @@ export function peelCorner(dir: 1 | -1, rtl: boolean): PeelCorner {
 export function easeOutCubic(t: number): number {
   const u = Math.max(0, Math.min(1, t));
   return 1 - (1 - u) ** 3;
+}
+
+export function easeInOutCubic(t: number): number {
+  const u = Math.max(0, Math.min(1, t));
+  return u < 0.5 ? 4 * u * u * u : 1 - ((-2 * u + 2) ** 3) / 2;
+}
+
+/** Hold crease lighting for the first quarter, then drop it while the leaf still covers the neighbor. */
+export function spreadShade(t: number): number {
+  const u = Math.max(0, Math.min(1, t));
+  if (u <= 0.25) return 1;
+  if (u >= 0.5) return 0;
+  const x = (u - 0.25) / 0.25;
+  return 1 - x * x * (3 - 2 * x);
 }

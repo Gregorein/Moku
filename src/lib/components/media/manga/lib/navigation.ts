@@ -58,7 +58,14 @@ export function goForward(
     if (adjacent.next) { onMaybeMarkRead(); openReader(adjacent.next); }
     return;
   }
-  if (style === "double" && readerState.pageGroups.length) { advanceGroup(true, adjacent, startAtLastPage); return; }
+  if (style === "double" && readerState.pageGroups.length) {
+    if (transition === "flip") {
+      void tryPeel(1, playPeel, () => advanceGroup(true, adjacent, startAtLastPage));
+      return;
+    }
+    advanceGroup(true, adjacent, startAtLastPage);
+    return;
+  }
   if (!readerState.pageUrls.length) return;
   if (readerState.pageNumber < lastPage) {
     if (transition === "flip") {
@@ -80,7 +87,14 @@ export function goBack(style: string, transition: string, adjacent: Adjacent, st
     if (adjacent.prev) { startAtLastPage(); openReader(adjacent.prev); }
     return;
   }
-  if (style === "double" && readerState.pageGroups.length) { advanceGroup(false, adjacent, startAtLastPage); return; }
+  if (style === "double" && readerState.pageGroups.length) {
+    if (transition === "flip") {
+      void tryPeel(-1, playPeel, () => advanceGroup(false, adjacent, startAtLastPage));
+      return;
+    }
+    advanceGroup(false, adjacent, startAtLastPage);
+    return;
+  }
   if (!readerState.pageUrls.length) return;
   if (readerState.pageNumber > 1) {
     if (transition === "flip") {

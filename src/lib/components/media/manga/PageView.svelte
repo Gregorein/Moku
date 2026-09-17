@@ -4,12 +4,14 @@
   import type { PinchTracker }  from "$lib/components/media/manga/lib/pinchZoom";
   import { READ_LINE_PCT }      from "$lib/components/media/manga/lib/scrollHandler";
   import { settingsState }      from "$lib/state/settings.svelte";
+  import { tick }               from "svelte";
   import LongstripViewer        from "$lib/components/media/manga/viewer/LongstripViewer.svelte";
   import SingleViewer           from "$lib/components/media/manga/viewer/SingleViewer.svelte";
-  import DoubleViewer           from "$lib/components/media/manga/viewer/DoubleViewer.svelte";
+  import DoubleViewer, { type SpreadFlip } from "$lib/components/media/manga/viewer/DoubleViewer.svelte";
   import {
     type PeelGeometry,
-    PEEL_MS, peelGeometry, peelCorner, easeOutCubic,
+    type FoldHalf,
+    PEEL_MS, FLIP_MS, peelGeometry, peelCorner, easeOutCubic, spreadShade,
   } from "$lib/components/media/manga/lib/pagePeel";
 
   export interface StripChapter {
@@ -104,8 +106,10 @@
   let currentGroupSrcs = $state<(string | null)[]>([]);
   let srcPage          = 0;
   let srcUrl           = "";
+  let srcGroupKey      = "";
   let incomingPeelSrc  = $state<string | null>(null);
   let peelGeom         = $state<PeelGeometry | null>(null);
+  let spreadFlip       = $state<SpreadFlip | null>(null);
   let peelRaf          = 0;
   let peelWait         = null as (() => void) | null;
 
@@ -116,13 +120,17 @@
     const group   = currentGroup;
     let cancelled = false;
     if (style === "double") {
+      const key = group.join(",");
+      if (srcGroupKey === key && currentGroupSrcs.length === group.length && currentGroupSrcs.every(Boolean)) return;
       currentGroupSrcs = group.map(() => null);
+      srcGroupKey = "";
       group.forEach((pg, i) => {
         const url = urls[pg - 1];
         if (!url) return;
         resolveUrl(url, 999).then(src => {
           if (cancelled) return;
           currentGroupSrcs = currentGroupSrcs.map((s, j) => j === i ? src : s);
+          if (currentGroupSrcs.length === group.length && currentGroupSrcs.every(Boolean)) srcGroupKey = key;
         });
       });
     } else {
@@ -161,6 +169,7 @@
       peelWait = null;
       peelGeom = null;
       incomingPeelSrc = null;
+      spreadFlip = null;
     };
   });
 
@@ -204,12 +213,118 @@
     });
   }
 
-  /** Auto corner-peel. Commits pageNumber after the outgoing layer is gone. Returns false to fall back to an instant swap. */
+  function measureSpread(): { w: number; h: number } | null {
+    const wrap = containerEl?.querySelector<HTMLElement>(".double-wrap");
+    if (!wrap) return null;
+    const w = wrap.offsetWidth;
+    const h = wrap.offsetHeight;
+    if (w < 16 || h < 8) return null;
+    return { w, h };
+  }
+
+  function runSpreadPeelAnim(corner: ReturnType<typeof peelCorner>, w: number, h: number, fold: FoldHalf): Promise<void> {
+    return new Promise(resolve => {
+      const t0 = performance.now();
+      peelWait = resolve;
+      const frame = (now: number) => {
+        const t = Math.min(1, (now - t0) / FLIP_MS);
+        const geom = peelGeometry(corner, easeOutCubic(t), w, h, fold);
+        if (spreadFlip) spreadFlip = { ...spreadFlip, geom, shade: spreadShade(t) };
+        if (t < 1) {
+          peelRaf = requestAnimationFrame(frame);
+          return;
+        }
+        peelRaf = 0;
+        peelWait = null;
+        resolve();
+      };
+      peelRaf = requestAnimationFrame(frame);
+    });
+  }
+
+  async function srcForPage(pg: number): Promise<string | null> {
+    const url = readerState.pageUrls[pg - 1];
+    if (!url) return null;
+    const src = await resolveUrl(url, 999);
+    await waitDecoded(src);
+    return src;
+  }
+
+  async function playSpreadFlip(dir: 1 | -1): Promise<boolean> {
+    const groups = pageGroups;
+    if (!groups.length) return false;
+    const from = readerState.pageNumber;
+    const gi = groups.findIndex(g => g.includes(from));
+    if (gi < 0) return false;
+    const toGi = gi + dir;
+    if (toGi < 0 || toGi >= groups.length) return false;
+
+    const fromFile = groups[gi];
+    const toFile   = groups[toGi];
+    const fromVis  = rtl ? [...fromFile].reverse() : [...fromFile];
+    const toVis    = rtl ? [...toFile].reverse() : [...toFile];
+    if (fromVis.length < 2) return false;
+
+    const fromRight = rtl ? dir === -1 : dir === 1;
+    const corner    = peelCorner(dir, rtl);
+    const fold: FoldHalf = fromRight ? "right" : "left";
+    const box       = measureSpread();
+    if (!box) return false;
+    const chapterId = readerState.activeChapter?.id;
+
+    readerState.turnDir = dir;
+    readerState.turning = true;
+
+    try {
+      const toLeft       = await srcForPage(toVis[0]);
+      const toRight      = await srcForPage(toVis.length > 1 ? toVis[1] : toVis[0]);
+      const fromLeft     = currentGroupSrcs[0] ?? await srcForPage(fromVis[0]);
+      const fromRightSrc = currentGroupSrcs[1] ?? await srcForPage(fromVis[1]);
+      if (!fromLeft || !fromRightSrc || !toLeft || !toRight) return false;
+      if (readerState.activeChapter?.id !== chapterId) return false;
+      if (readerState.pageNumber !== from) return false;
+
+      spreadFlip = {
+        fromRight,
+        geom:       peelGeometry(corner, 0, box.w, box.h, fold),
+        shade:      1,
+        underLeft:  toLeft,
+        underRight: toRight,
+        outLeft:    fromLeft,
+        outRight:   fromRightSrc,
+        flapSrc:    fromRight ? toLeft : toRight,
+      };
+      await tick();
+      const live = measureSpread();
+      await runSpreadPeelAnim(corner, live?.w ?? box.w, live?.h ?? box.h, fold);
+      if (readerState.activeChapter?.id !== chapterId) return false;
+
+      currentGroupSrcs = toVis.length > 1 ? [toLeft, toRight] : [toLeft];
+      srcGroupKey = toVis.join(",");
+      readerState.pageNumber = toFile[0];
+      await tick();
+      spreadFlip = null;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (peelRaf) cancelAnimationFrame(peelRaf);
+      peelRaf = 0;
+      peelWait?.();
+      peelWait = null;
+      spreadFlip = null;
+      readerState.turning = false;
+    }
+  }
+
+  /** Auto corner-peel or spread flip. Commits pageNumber after the outgoing layer is gone. */
   export async function playPeel(dir: 1 | -1): Promise<boolean> {
-    if (style !== "single" && style !== "auto") return false;
     if (readerState.turning) return false;
     if (readerState.inspectScale > 1) return false;
-    if (!currentSrc || !pageReady) return false;
+    if (!pageReady) return false;
+    if (style === "double") return playSpreadFlip(dir);
+    if (style !== "single" && style !== "auto") return false;
+    if (!currentSrc) return false;
 
     const from = readerState.pageNumber;
     const to   = from + dir;
@@ -252,6 +367,7 @@
       peelWait = null;
       incomingPeelSrc = null;
       peelGeom = null;
+      spreadFlip = null;
       readerState.turning = false;
     }
   }
@@ -560,7 +676,7 @@
       style="--turn-x:{transition === 'slide' ? `${turnDir * 40}%` : '0'};--turn-deg:0deg;--turn-op:{transition === 'none' || transition === 'flip' ? 1 : (turning ? 0 : 1)};--turn-speed:{transition === 'fade' ? '0.1s' : '0.18s'}"
     >
       {#if style === "double"}
-        <DoubleViewer {imgCls} {currentGroup} srcs={currentGroupSrcs} {pageGroups} />
+        <DoubleViewer {imgCls} {currentGroup} srcs={currentGroupSrcs} {pageGroups} flip={spreadFlip} />
       {:else}
         <SingleViewer {imgCls} src={currentSrc} incomingSrc={incomingPeelSrc} peel={peelGeom} />
       {/if}
