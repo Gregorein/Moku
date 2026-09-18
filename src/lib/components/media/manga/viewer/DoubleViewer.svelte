@@ -19,6 +19,10 @@
     outRight:   string | null;
     outFull:    string | null;
     flapSrc:    string | null;
+    fromStart:  boolean;
+    fromEnd:    boolean;
+    toStart:    boolean;
+    toEnd:      boolean;
   }
 
   interface Props {
@@ -64,6 +68,15 @@
     return side === startSide ? "prev" : "next";
   }
 
+  function allowNeighbor(side: "left" | "right", atStart: boolean, atEnd: boolean): boolean {
+    return neighborKind(side) === "prev" ? atStart : atEnd;
+  }
+
+  const groupEdge = $derived.by(() => {
+    const gi = pageGroups.findIndex(g => g.some(p => currentGroup.includes(p)));
+    return { start: gi === 0, end: gi === pageGroups.length - 1 && gi >= 0 };
+  });
+
   const pageAspect = $derived.by(() => {
     const pg = idle.leftPg ?? idle.rightPg ?? idle.full;
     if (pg == null) return 2 / 3;
@@ -90,10 +103,10 @@
             <img src={flip.underFull} alt="" class="{imgCls} page-full" decoding="async" draggable="false" />
           {:else}
             <div class="slot gap-left">
-              {@render pageSlot(flip.underLeft, flip.underLeft ? 1 : null, "left", "")}
+              {@render pageSlot(flip.underLeft, flip.underLeft ? 1 : null, "left", "", flip.toStart, flip.toEnd)}
             </div>
             <div class="slot gap-right">
-              {@render pageSlot(flip.underRight, flip.underRight ? 1 : null, "right", "")}
+              {@render pageSlot(flip.underRight, flip.underRight ? 1 : null, "right", "", flip.toStart, flip.toEnd)}
             </div>
           {/if}
         </div>
@@ -115,10 +128,10 @@
             <img src={flip.outFull} alt="" class="{imgCls} page-full" decoding="async" draggable="false" />
           {:else}
             <div class="slot gap-left">
-              {@render pageSlot(flip.outLeft, flip.outLeft ? 1 : null, "left", "")}
+              {@render pageSlot(flip.outLeft, flip.outLeft ? 1 : null, "left", "", flip.fromStart, flip.fromEnd)}
             </div>
             <div class="slot gap-right">
-              {@render pageSlot(flip.outRight, flip.outRight ? 1 : null, "right", "")}
+              {@render pageSlot(flip.outRight, flip.outRight ? 1 : null, "right", "", flip.fromStart, flip.fromEnd)}
             </div>
           {/if}
         </div>
@@ -176,10 +189,10 @@
         {/if}
       {:else}
         <div class="slot gap-left">
-          {@render pageSlot(idle.leftSrc, idle.leftPg, "left", `Page ${idle.leftPg}`)}
+          {@render pageSlot(idle.leftSrc, idle.leftPg, "left", `Page ${idle.leftPg}`, groupEdge.start, groupEdge.end)}
         </div>
         <div class="slot gap-right">
-          {@render pageSlot(idle.rightSrc, idle.rightPg, "right", `Page ${idle.rightPg}`)}
+          {@render pageSlot(idle.rightSrc, idle.rightPg, "right", `Page ${idle.rightPg}`, groupEdge.start, groupEdge.end)}
         </div>
       {/if}
     </div>
@@ -215,13 +228,15 @@
   </div>
 {/snippet}
 
-{#snippet pageSlot(src: string | null, pg: number | null, side: "left" | "right", alt: string)}
+{#snippet pageSlot(src: string | null, pg: number | null, side: "left" | "right", alt: string, atStart: boolean, atEnd: boolean)}
   {#if src}
     <img {src} {alt} class={imgCls} decoding="async" draggable="false" />
   {:else if pg != null}
     <div class="page-loader" aria-hidden="true">{@render skeleton()}</div>
-  {:else}
+  {:else if allowNeighbor(side, atStart, atEnd)}
     {@render neighbor(side)}
+  {:else}
+    <div class="spread-void"></div>
   {/if}
 {/snippet}
 
@@ -266,7 +281,8 @@
     width: 0;
     min-width: 0;
   }
-  .double-wrap.peeling .spread-neighbor {
+  .double-wrap.peeling .spread-neighbor,
+  .double-wrap.peeling .spread-void {
     width: 100%;
     height: 100%;
     aspect-ratio: auto;
@@ -299,6 +315,12 @@
     background: var(--bg-raised);
     border: 1px solid var(--border-dim);
     color: var(--text-secondary);
+  }
+  .spread-void {
+    height: 100%;
+    aspect-ratio: var(--page-aspect, 0.67);
+    width: auto;
+    flex: 0 0 auto;
   }
   .sn-kicker {
     margin: 0;

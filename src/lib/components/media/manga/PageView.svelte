@@ -347,6 +347,10 @@
         outRight:   fromRightSrc,
         outFull:    fromFull,
         flapSrc:    foldFull ? (fromFull ?? fromRightSrc ?? fromLeft) : (fromRight ? toLeft : toRight),
+        fromStart:  gi === 0,
+        fromEnd:    gi === groups.length - 1,
+        toStart:    toGi === 0,
+        toEnd:      toGi === groups.length - 1,
       };
       await tick();
       await runSpreadPeelAnim(corner, box.w, box.h, fold);
