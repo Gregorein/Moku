@@ -2,6 +2,7 @@
   import { readerState }        from "$lib/state/mangaReader.svelte";
   import { createPinchTracker } from "$lib/components/media/manga/lib/pinchZoom";
   import type { PinchTracker }  from "$lib/components/media/manga/lib/pinchZoom";
+  import { createPageGestures } from "$lib/components/media/manga/lib/inspectGestures";
   import { READ_LINE_PCT }      from "$lib/components/media/manga/lib/scrollHandler";
   import { settingsState }      from "$lib/state/settings.svelte";
   import { tick }               from "svelte";
@@ -532,42 +533,39 @@
     if (scrollTotal - scrollBottom < containerEl.clientHeight * 1.5) onAppend();
   }
 
-  const INSPECT_ZOOM_STEP = 0.15;
-  const INSPECT_ZOOM_MAX  = 8;
-
   let containerEl = $state<HTMLDivElement | undefined>();
   let stripRef: LongstripViewer | undefined = $state();
+  let pinch: PinchTracker | null = null;
 
   export function captureAnchor()              { stripRef?.captureAnchor(); }
   export function restoreAnchor()              { stripRef?.restoreAnchor(); }
   export function notifyScrollCenter(idx: number)        { stripRef?.notifyScrollCenter(idx); }
   export async function scrollToFlatIndex(idx: number)   { await stripRef?.scrollToFlatIndex(idx); }
 
-  function getInspectImageEl(): HTMLElement | null {
-    if (!containerEl) return null;
-    return (
-      containerEl.querySelector<HTMLElement>(".inspect-wrap .double-wrap") ??
-      containerEl.querySelector<HTMLElement>(".peel-stack > img.peel-front") ??
-      containerEl.querySelector<HTMLElement>(".inspect-wrap img")
-    );
-  }
+  const gestures = createPageGestures({
+    getContainer:    () => containerEl,
+    isLongstrip:     () => style === "longstrip",
+    getRtl:          () => rtl,
+    getInspectScale: () => readerState.inspectScale,
+    getPan:          () => ({ x: readerState.inspectPanX, y: readerState.inspectPanY }),
+    setInspect:      (scale, panX, panY) => {
+      readerState.inspectScale = scale;
+      readerState.inspectPanX  = panX;
+      readerState.inspectPanY  = panY;
+    },
+    getPinch:        () => pinch,
+    onSwipe,
+    onWheelNav:      onWheel,
+    getStrip:        () => stripRef,
+  });
 
-  function clampInspectPan(scale: number, px: number, py: number): [number, number] {
-    const img = getInspectImageEl();
-    if (!img) return [px, py];
-    const maxX = Math.max(0, (img.offsetWidth  * (scale - 1)) / 2);
-    const maxY = Math.max(0, (img.offsetHeight * (scale - 1)) / 2);
-    return [Math.max(-maxX, Math.min(maxX, px)), Math.max(-maxY, Math.min(maxY, py))];
-  }
-
-  let inspectDragging   = false;
-  let inspectDragMoved  = false;
-  let inspectDragStartX = 0;
-  let inspectDragStartY = 0;
-  let inspectPanStartX  = 0;
-  let inspectPanStartY  = 0;
-
-  let pinch: PinchTracker | null = null;
+  export const onInspectMouseDown = gestures.onInspectMouseDown;
+  export const onInspectMouseMove = gestures.onInspectMouseMove;
+  export const onInspectMouseUp   = gestures.onInspectMouseUp;
+  export const onPointerDown      = gestures.onPointerDown;
+  export const onPointerMove      = gestures.onPointerMove;
+  export const onPointerUp        = gestures.onPointerUp;
+  export const handleWheel        = gestures.onWheel;
 
   $effect(() => {
     if (pinchZoomEnabled) {
@@ -586,123 +584,11 @@
 
   $effect(() => { if (style !== "longstrip") readerState.resetInspect(); });
 
-  export function onInspectMouseDown(e: MouseEvent) {
-    if (e.button !== 0) return;
-    if ((e.target as Element).closest(".bar")) return;
-    if (style === "longstrip") { stripRef?.onMouseDown(e); return; }
-    if (readerState.inspectScale <= 1) return;
-    inspectDragging   = true;
-    inspectDragMoved  = false;
-    inspectDragStartX = e.clientX;
-    inspectDragStartY = e.clientY;
-    inspectPanStartX  = readerState.inspectPanX;
-    inspectPanStartY  = readerState.inspectPanY;
-    e.preventDefault();
-  }
-
-  export function onInspectMouseMove(e: MouseEvent) {
-    if (style === "longstrip") { stripRef?.onMouseMove(e); return; }
-    if (!inspectDragging) return;
-    if (!inspectDragMoved && Math.abs(e.clientX - inspectDragStartX) + Math.abs(e.clientY - inspectDragStartY) > 4) inspectDragMoved = true;
-    const rawX = inspectPanStartX + (e.clientX - inspectDragStartX);
-    const rawY = inspectPanStartY + (e.clientY - inspectDragStartY);
-    const [cx, cy] = clampInspectPan(readerState.inspectScale, rawX, rawY);
-    readerState.inspectPanX = cx;
-    readerState.inspectPanY = cy;
-  }
-
-  export function onInspectMouseUp() {
-    if (style === "longstrip") { stripRef?.onMouseUp(); return; }
-    inspectDragging = false;
-  }
-
-  const SWIPE_MIN_DIST = 50;
-
-  let swipeActive  = false;
-  let swipeStartX  = 0;
-  let swipeStartY  = 0;
-  let justSwiped   = false;
-
-  function swipeEligible(): boolean {
-    return style !== "longstrip" && readerState.inspectScale <= 1 && !pinch?.isPinching();
-  }
-
-  export function onPointerDown(e: PointerEvent) {
-    if (e.button !== 0) return;
-    if ((e.target as Element).closest(".bar")) return;
-    pinch?.onPointerDown(e);
-    if (style === "longstrip") { stripRef?.onPointerDown(e); return; }
-    if (swipeEligible() && readerState.inspectScale <= 1) {
-      swipeActive = true;
-      swipeStartX = e.clientX;
-      swipeStartY = e.clientY;
-    }
-  }
-
-  export function onPointerMove(e: PointerEvent) {
-    if (pinch?.isPinching()) { pinch.onPointerMove(e); swipeActive = false; return; }
-    if (style === "longstrip") { stripRef?.onPointerMove(e); return; }
-    if (inspectDragging) {
-      if (!inspectDragMoved && Math.abs(e.clientX - inspectDragStartX) + Math.abs(e.clientY - inspectDragStartY) > 4) inspectDragMoved = true;
-      const rawX = inspectPanStartX + (e.clientX - inspectDragStartX);
-      const rawY = inspectPanStartY + (e.clientY - inspectDragStartY);
-      const [cx, cy] = clampInspectPan(readerState.inspectScale, rawX, rawY);
-      readerState.inspectPanX = cx;
-      readerState.inspectPanY = cy;
-    }
-  }
-
-  export function onPointerUp(e: PointerEvent) {
-    pinch?.onPointerUp(e);
-    if (!pinch?.isPinching()) {
-      if (style === "longstrip") { stripRef?.onPointerUp(); return; }
-      inspectDragging = false;
-    }
-    if (swipeActive) {
-      swipeActive = false;
-      const dx = e.clientX - swipeStartX;
-      const dy = e.clientY - swipeStartY;
-      if (Math.abs(dx) >= SWIPE_MIN_DIST && Math.abs(dx) > Math.abs(dy)) {
-        const draggedLeft = dx < 0;
-        justSwiped = true;
-        onSwipe(rtl ? !draggedLeft : draggedLeft);
-      }
-    }
-  }
-
-  export function handleWheel(e: WheelEvent) {
-    if (style === "longstrip") {
-      if (e.ctrlKey) onWheel(e);
-      else stripRef?.onWheel(e);
-      return;
-    }
-    if (!e.ctrlKey) { onWheel(e); return; }
-    e.preventDefault();
-    const delta = e.deltaY < 0 ? INSPECT_ZOOM_STEP : -INSPECT_ZOOM_STEP;
-    const next  = Math.max(1, Math.min(INSPECT_ZOOM_MAX, readerState.inspectScale + delta));
-    if (next === readerState.inspectScale) return;
-    if (next === 1) { readerState.inspectScale = 1; readerState.inspectPanX = 0; readerState.inspectPanY = 0; return; }
-    const img    = getInspectImageEl();
-    const anchor = img ?? containerEl ?? null;
-    const rect   = anchor?.getBoundingClientRect();
-    const cx     = rect ? e.clientX - rect.left - rect.width  / 2 : 0;
-    const cy     = rect ? e.clientY - rect.top  - rect.height / 2 : 0;
-    const ratio  = next / readerState.inspectScale;
-    const [clampedX, clampedY] = clampInspectPan(next, cx + (readerState.inspectPanX - cx) * ratio, cy + (readerState.inspectPanY - cy) * ratio);
-    readerState.inspectScale = next;
-    readerState.inspectPanX  = clampedX;
-    readerState.inspectPanY  = clampedY;
-  }
-
   let tapTimer: ReturnType<typeof setTimeout> | null = null;
 
   function handleTap(e: MouseEvent) {
-    if (justSwiped) { justSwiped = false; return; }
-    if (style === "longstrip") {
-      if (stripRef?.consumeTap()) return;
-      return;
-    }
-    if (inspectDragMoved) { inspectDragMoved = false; return; }
+    if (gestures.consumeTap()) return;
+    if (style === "longstrip") return;
     if (tapToToggleBar) {
       if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; return; }
       tapTimer = setTimeout(() => { tapTimer = null; onTap(e); }, 220);
@@ -739,7 +625,10 @@
   onscroll={style === "longstrip" ? handleScroll : undefined}
   onmousedown={onInspectMouseDown}
   onpointerdown={onPointerDown}
-  onwheel={(e) => { if (e.ctrlKey || style !== "longstrip") e.preventDefault(); }}
+  onwheel={(e) => {
+    if (e.ctrlKey || style !== "longstrip") e.preventDefault();
+    handleWheel(e);
+  }}
   onkeydown={(e) => {
     if (e.key === " " && style === "longstrip") {
       e.preventDefault();

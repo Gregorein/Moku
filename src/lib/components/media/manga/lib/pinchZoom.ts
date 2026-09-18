@@ -1,9 +1,7 @@
 import { createPinchGesture }  from "$lib/core/ui/touchscreen";
-import { clampZoom }           from "./zoomHelpers";
+import { clampZoom, INSPECT_ZOOM_MAX } from "./zoomHelpers";
 
 export type { PinchGesture as PinchTracker } from "$lib/core/ui/touchscreen";
-
-const INSPECT_ZOOM_MAX = 8;
 
 export interface PinchTrackerOptions {
   getZoom:         () => number;
