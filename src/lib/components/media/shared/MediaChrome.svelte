@@ -243,8 +243,9 @@
     box-shadow: var(--frost-shadow);
   }
   .bar-top {
-    top: var(--sp-3); left: var(--sp-3); right: var(--sp-3);
+    top: calc(var(--sp-3) + var(--titlebar-slide)); left: var(--sp-3); right: var(--sp-3);
     flex-direction: row; gap: 2px; padding: 0 var(--sp-2); height: 44px;
+    transition: opacity 0.2s ease, transform 0.2s ease, top 0.2s ease;
   }
   .bar.hidden { opacity: 0; pointer-events: none; transform: translateY(-8px); }
 

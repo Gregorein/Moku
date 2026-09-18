@@ -468,7 +468,7 @@
     box-shadow: none;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    transition: opacity 0.2s ease, transform 0.2s ease;
+    transition: opacity 0.2s ease, transform 0.2s ease, top 0.2s ease;
     overflow: visible;
     user-select: none;
   }
@@ -490,11 +490,12 @@
   .bar-top {
     flex-direction: row;
     gap: 2px;
-    top: var(--sp-3);
+    top: calc(var(--sp-3) + var(--titlebar-slide));
     left: var(--sp-3);
     right: var(--sp-3);
     padding: 0 var(--sp-2);
     height: 44px;
+    transition: opacity 0.2s ease, transform 0.2s ease, top 0.2s ease;
   }
   .bar-top.hidden { transform: translateY(-8px); }
 
@@ -503,7 +504,7 @@
     justify-content: space-between;
     padding: var(--sp-3) 0;
     width: 44px;
-    top: var(--sp-3);
+    top: calc(var(--sp-3) + var(--titlebar-slide));
     bottom: var(--sp-3);
     gap: 0;
   }

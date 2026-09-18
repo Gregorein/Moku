@@ -2,6 +2,7 @@ import type { Manga, Chapter }      from "$lib/types";
 import type { MangaPrefs, ReaderSettings, ReaderPreset } from "$lib/types/settings";
 import { settingsState, updateSettings }                 from "$lib/state/settings.svelte";
 import { seriesState } from "$lib/state/series.svelte";
+import { chromeState } from "$lib/state/chrome.svelte";
 import { DEFAULT_MANGA_PREFS } from "$lib/types/settings";
 import { goto }                                          from "$app/navigation";
 
@@ -54,7 +55,8 @@ class ReaderState {
 
   readonly holdUi = $derived(
     this.chapterPickerOpen || this.pageInputFocused || this.winOpen ||
-    this.zoomOpen || this.actionsOpen || this.dlOpen || this.presetOpen
+    this.zoomOpen || this.actionsOpen || this.dlOpen || this.presetOpen ||
+    chromeState.titlebarRevealed
   );
   nextN            = $state(5);
   dlBusy           = $state(false);

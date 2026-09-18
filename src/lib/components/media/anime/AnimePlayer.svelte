@@ -1330,7 +1330,7 @@
 
   .cc-menu.nm-menu {
     position: fixed;
-    top: calc(var(--sp-3) + 44px + var(--sp-2));
+    top: calc(var(--sp-3) + 44px + var(--sp-2) + var(--titlebar-slide));
     right: var(--sp-3);
     left: auto;
     width: 272px;
