@@ -123,9 +123,6 @@
     return lastPage || 1;
   });
 
-  const sliderPctRaw = $derived(sliderMax > 1 ? ((sliderPage - 1) / (sliderMax - 1)) * 100 : 0);
-  const sliderPct    = $derived(rtl ? 100 - sliderPctRaw : sliderPctRaw);
-
   const perMangaEnabled = $derived(
     readerState.activeManga?.id != null &&
     !!(settingsState.settings.mangaReaderSettings ?? {})[readerState.activeManga.id]
@@ -198,6 +195,15 @@
       visibleChapterId ?? readerState.activeChapter?.id ?? "",
       pageViewRef?.getStripChunks() ?? [],
     );
+  }
+
+  function jumpSliderSlot(slot: number, commit = true) {
+    let page = slot;
+    if (style === "double" && readerState.pageGroups.length) {
+      const group = readerState.pageGroups[slot - 1];
+      if (group?.length) page = group[0];
+    }
+    primedJump(page, commit);
   }
 
   const goNext = $derived(rtl
@@ -629,13 +635,14 @@
     <ReaderProgressBar
       {style}
       loading={readerState.loading}
-      {rtl} {sliderPage} {sliderMax} {sliderPct} {lastPage}
-      {displayChapter} {adjacent}
+      {rtl} {sliderPage} {sliderMax} {lastPage}
+      pageGroups={readerState.pageGroups}
+      {adjacent}
       uiVisible={readerState.uiVisible}
       {barPosition}
       onGoPrev={goPrev}
       onGoNext={goNext}
-      onJumpToPage={(p, commit) => primedJump(p, commit)}
+      onJumpToPage={(p, commit) => jumpSliderSlot(p, commit)}
     />
   {/snippet}
 
@@ -643,13 +650,14 @@
     <ReaderProgressBar
       {style}
       loading={readerState.loading}
-      {rtl} {sliderPage} {sliderMax} {sliderPct} {lastPage}
-      {displayChapter} {adjacent}
+      {rtl} {sliderPage} {sliderMax} {lastPage}
+      pageGroups={readerState.pageGroups}
+      {adjacent}
       uiVisible={readerState.uiVisible}
       {barPosition}
       onGoPrev={goPrev}
       onGoNext={goNext}
-      onJumpToPage={(p, commit) => primedJump(p, commit)}
+      onJumpToPage={(p, commit) => jumpSliderSlot(p, commit)}
     />
   {/if}
 </div>

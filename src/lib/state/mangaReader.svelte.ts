@@ -54,8 +54,6 @@ class ReaderState {
 
   turning          = $state(false);
   turnDir          = $state<1 | -1>(1);
-  sliderDragging   = $state(false);
-  sliderHover      = $state(false);
 
   resumePage       = $state(0);
   resumeDismissed  = $state(false);
