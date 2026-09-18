@@ -139,7 +139,7 @@
   let appending          = false;
   let abortCtrl          = { current: null as AbortController | null };
   let hasNavigated       = false;
-  let startAtLastPageRef = { current: false };
+  let startPosRef        = { current: "first" as "first" | "last" | "boundaryForward" | "boundaryBack" | "exact", exactPage: 1 };
   let tickTimer:     ReturnType<typeof setTimeout> | null = null;
   let progressTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -180,7 +180,17 @@
     restoreZoomAnchor(containerEl, zoomAnchor);
   }
 
-  const startAtLast = () => { startAtLastPageRef.current = true; };
+  const startAtLast          = () => { startPosRef.current = "last"; };
+  const startBoundaryForward = () => { startPosRef.current = "boundaryForward"; };
+  const startBoundaryBack    = () => { startPosRef.current = "boundaryBack"; };
+
+  function crossBoundary(dir: 1 | -1, targetPage: number) {
+    const ch = dir === 1 ? adjacent.next : adjacent.prev;
+    if (!ch) return;
+    startPosRef.current   = "exact";
+    startPosRef.exactPage = targetPage;
+    readerState.openReader(ch, readerState.activeManga);
+  }
 
   function primedJump(page: number, commit = true) {
     if (useBlob && commit && style !== "longstrip") {
@@ -203,11 +213,11 @@
   const playPeel = (dir: 1 | -1) => pageViewRef?.playPeel(dir) ?? Promise.resolve(false);
 
   const goNext = $derived(rtl
-    ? () => goBack(style, transition, adjacent, startAtLast, playPeel)
-    : () => goForward(style, transition, adjacent, lastPage, maybeMarkCurrentRead, startAtLast, playPeel));
+    ? () => goBack(style, transition, adjacent, startAtLast, startBoundaryBack, playPeel)
+    : () => goForward(style, transition, adjacent, lastPage, maybeMarkCurrentRead, startAtLast, startBoundaryForward, playPeel));
   const goPrev = $derived(rtl
-    ? () => goForward(style, transition, adjacent, lastPage, maybeMarkCurrentRead, startAtLast, playPeel)
-    : () => goBack(style, transition, adjacent, startAtLast, playPeel));
+    ? () => goForward(style, transition, adjacent, lastPage, maybeMarkCurrentRead, startAtLast, startBoundaryForward, playPeel)
+    : () => goBack(style, transition, adjacent, startAtLast, startBoundaryBack, playPeel));
 
   function handleSwipe(forward: boolean) {
     if (forward) goNext(); else goPrev();
@@ -302,7 +312,7 @@
           manga.id, manga.title, manga.thumbnailUrl,
           ch.id, ch.name, readerState.pageNumber,
         );
-        loadChapter(manga.id, ch.id, useBlob, abortCtrl, startAtLastPageRef, markedRead, adjacent);
+        loadChapter(manga.id, ch.id, useBlob, abortCtrl, startPosRef, markedRead, style === "double", adjacent);
       });
     }
   });
@@ -375,13 +385,9 @@
 
   $effect(() => {
     if (style === "double" && readerState.pageUrls.length) {
-      let cancelled = false;
       const snap = readerState.pageUrls;
-      Promise.all(snap.map(url => measureAspect(url, useBlob))).then(aspects => {
-        if (cancelled || snap !== readerState.pageUrls) return;
-        readerState.pageGroups = buildPageGroups(snap, aspects, effectiveReaderSettings.offsetDoubleSpreads ?? false);
-      });
-      return () => { cancelled = true; };
+      readerState.pageGroups = buildPageGroups(snap, effectiveReaderSettings.offsetDoubleSpreads ?? false);
+      for (const url of snap) void measureAspect(url, useBlob);
     } else {
       readerState.pageGroups = [];
     }
@@ -596,21 +602,7 @@
     onChapterChange={(id) => { visibleChapterId = id; }}
     onCenterIdxChange={(idx) => { pageViewRef?.notifyScrollCenter(idx); }}
     onMarkRead={(id) => { if (settingsState.settings.autoMarkRead ?? true) markChapterRead(id, markedRead) }}
-    mangaTitle={readerState.activeManga?.title ?? ""}
-    prevChapter={adjacent.prev}
-    nextChapter={adjacent.next}
-    onOpenPrevChapter={() => {
-      if (!adjacent.prev) return;
-      startAtLast();
-      readerState.openReader(adjacent.prev, readerState.activeManga);
-    }}
-    onOpenNextChapter={() => {
-      if (!adjacent.next) return;
-      maybeMarkCurrentRead();
-      readerState.pageNumber = 1;
-      readerState.openReader(adjacent.next, readerState.activeManga);
-    }}
-    onLibrary={() => handleCloseReader()}
+    onCrossBoundary={crossBoundary}
     onAppend={() => {
       if (appending) return;
       const chunks    = pageViewRef?.getStripChunks() ?? [];

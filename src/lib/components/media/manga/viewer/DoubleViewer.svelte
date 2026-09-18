@@ -1,9 +1,7 @@
 <script lang="ts">
   import { readerState } from "$lib/state/mangaReader.svelte";
-  import type { Chapter } from "$lib/types";
   import type { PeelGeometry } from "$lib/components/media/manga/lib/pagePeel";
   import { getCachedAspect, spreadLayout } from "$lib/components/media/manga/lib/pageLoader";
-  import { Books, CaretLeft, CaretRight } from "phosphor-svelte";
 
   export interface SpreadFlip {
     fromRight:  boolean;
@@ -26,62 +24,49 @@
   }
 
   interface Props {
-    imgCls:            string;
-    currentGroup:      number[];
-    srcs:              (string | null)[];
-    pageGroups:        number[][];
-    rtl:               boolean;
-    flip?:             SpreadFlip | null;
-    mangaTitle:        string;
-    prevChapter:       Chapter | null;
-    nextChapter:       Chapter | null;
-    onOpenPrevChapter: () => void;
-    onOpenNextChapter: () => void;
-    onLibrary:         () => void;
-    prevPeekSrc?:      string | null;
-    nextPeekSrc?:      string | null;
+    imgCls:          string;
+    currentGroup:    number[];
+    srcs:            (string | null)[];
+    pageGroups:      number[][];
+    rtl:             boolean;
+    flip?:           SpreadFlip | null;
+    boundaryPrevSrc?: string | null;
+    boundaryNextSrc?: string | null;
   }
 
   const {
     imgCls, currentGroup, srcs, pageGroups, rtl,
     flip = null,
-    mangaTitle, prevChapter, nextChapter, onOpenPrevChapter, onOpenNextChapter, onLibrary,
-    prevPeekSrc = null, nextPeekSrc = null,
+    boundaryPrevSrc = null, boundaryNextSrc = null,
   }: Props = $props();
 
   const idle = $derived.by(() => {
-    const layout = spreadLayout(currentGroup, rtl, pg => getCachedAspect(readerState.pageUrls[pg - 1]) ?? 0.67);
+    const layout = spreadLayout(currentGroup, rtl);
     const srcOf = (pg: number | null) => {
       if (pg == null) return null;
       const i = currentGroup.indexOf(pg);
       return i >= 0 ? srcs[i] ?? null : null;
     };
+    let leftSrc  = srcOf(layout.left);
+    let rightSrc = srcOf(layout.right);
+    const totalPages = readerState.pageUrls.length;
+    const soloPg = layout.left ?? layout.right;
+    if (soloPg != null && totalPages > 1) {
+      if (soloPg === 1 && layout.left == null && boundaryPrevSrc) leftSrc = boundaryPrevSrc;
+      else if (soloPg === 1 && layout.right == null && boundaryPrevSrc) rightSrc = boundaryPrevSrc;
+      else if (soloPg === totalPages && layout.left == null && boundaryNextSrc) leftSrc = boundaryNextSrc;
+      else if (soloPg === totalPages && layout.right == null && boundaryNextSrc) rightSrc = boundaryNextSrc;
+    }
     return {
-      full:     layout.full,
-      leftSrc:  srcOf(layout.left),
-      rightSrc: srcOf(layout.right),
-      fullSrc:  srcOf(layout.full),
+      leftSrc,
+      rightSrc,
       leftPg:   layout.left,
       rightPg:  layout.right,
     };
   });
 
-  function neighborKind(side: "left" | "right"): "prev" | "next" {
-    const startSide = rtl ? "right" : "left";
-    return side === startSide ? "prev" : "next";
-  }
-
-  function allowNeighbor(side: "left" | "right", atStart: boolean, atEnd: boolean): boolean {
-    return neighborKind(side) === "prev" ? atStart : atEnd;
-  }
-
-  const groupEdge = $derived.by(() => {
-    const gi = pageGroups.findIndex(g => g.some(p => currentGroup.includes(p)));
-    return { start: gi === 0, end: gi === pageGroups.length - 1 && gi >= 0 };
-  });
-
   const pageAspect = $derived.by(() => {
-    const pg = idle.leftPg ?? idle.rightPg ?? idle.full;
+    const pg = idle.leftPg ?? idle.rightPg;
     if (pg == null) return 2 / 3;
     return getCachedAspect(readerState.pageUrls[pg - 1]) ?? 2 / 3;
   });
@@ -95,7 +80,6 @@
     <div
       class="double-wrap"
       class:peeling={!!flip}
-      class:solo-full={!flip && idle.full != null}
       style:width={flip ? `${flip.boxW}px` : undefined}
       style:height={flip ? `${flip.boxH}px` : undefined}
       style:--page-aspect={pageAspect}
@@ -106,10 +90,10 @@
             <img src={flip.underFull} alt="" class="{imgCls} page-full" decoding="async" draggable="false" />
           {:else}
             <div class="slot gap-left">
-              {@render pageSlot(flip.underLeft, flip.underLeft ? 1 : null, "left", "", flip.toStart, flip.toEnd)}
+              {@render pageSlot(flip.underLeft, flip.underLeft ? 1 : null, "")}
             </div>
             <div class="slot gap-right">
-              {@render pageSlot(flip.underRight, flip.underRight ? 1 : null, "right", "", flip.toStart, flip.toEnd)}
+              {@render pageSlot(flip.underRight, flip.underRight ? 1 : null, "")}
             </div>
           {/if}
         </div>
@@ -131,10 +115,10 @@
             <img src={flip.outFull} alt="" class="{imgCls} page-full" decoding="async" draggable="false" />
           {:else}
             <div class="slot gap-left">
-              {@render pageSlot(flip.outLeft, flip.outLeft ? 1 : null, "left", "", flip.fromStart, flip.fromEnd)}
+              {@render pageSlot(flip.outLeft, flip.outLeft ? 1 : null, "")}
             </div>
             <div class="slot gap-right">
-              {@render pageSlot(flip.outRight, flip.outRight ? 1 : null, "right", "", flip.fromStart, flip.fromEnd)}
+              {@render pageSlot(flip.outRight, flip.outRight ? 1 : null, "")}
             </div>
           {/if}
         </div>
@@ -184,18 +168,12 @@
             </svg>
           </div>
         {/if}
-      {:else if idle.full != null}
-        {#if idle.fullSrc}
-          <img src={idle.fullSrc} alt="Page {idle.full}" class="{imgCls} page-full" decoding="async" draggable="false" />
-        {:else}
-          <div class="page-loader page-full" aria-hidden="true">{@render skeleton()}</div>
-        {/if}
       {:else}
         <div class="slot gap-left">
-          {@render pageSlot(idle.leftSrc, idle.leftPg, "left", `Page ${idle.leftPg}`, groupEdge.start, groupEdge.end)}
+          {@render pageSlot(idle.leftSrc, idle.leftPg, `Page ${idle.leftPg}`)}
         </div>
         <div class="slot gap-right">
-          {@render pageSlot(idle.rightSrc, idle.rightPg, "right", `Page ${idle.rightPg}`, groupEdge.start, groupEdge.end)}
+          {@render pageSlot(idle.rightSrc, idle.rightPg, `Page ${idle.rightPg}`)}
         </div>
       {/if}
     </div>
@@ -206,46 +184,11 @@
   {/if}
 </div>
 
-{#snippet neighbor(side: "left" | "right")}
-  {@const kind = neighborKind(side)}
-  {@const chapter = kind === "next" ? nextChapter : prevChapter}
-  {@const onOpen = kind === "next" ? onOpenNextChapter : onOpenPrevChapter}
-  {@const peekSrc = kind === "next" ? nextPeekSrc : prevPeekSrc}
-  <div class="spread-neighbor" class:sn-left={side === "left"} class:sn-right={side === "right"}>
-    {#if peekSrc}
-      <img class="sn-peek" src={peekSrc} alt="" draggable="false" decoding="async" />
-    {/if}
-    <div class="sn-veil"></div>
-    <div class="sn-copy">
-      {#if chapter}
-        <p class="sn-kicker">{kind === "next" ? "Next" : "Previous"}</p>
-        <p class="sn-title">{mangaTitle}</p>
-        <p class="sn-ch">{chapter.name}</p>
-        <button type="button" class="sn-btn" onclick={(e) => { e.stopPropagation(); onOpen(); }}>
-          {#if kind === "next"}
-            Continue <CaretRight size={12} weight="bold" />
-          {:else}
-            <CaretLeft size={12} weight="bold" /> Continue
-          {/if}
-        </button>
-      {:else}
-        <p class="sn-kicker">{kind === "next" ? "End of series" : "Beginning"}</p>
-        <p class="sn-title">{mangaTitle}</p>
-      {/if}
-      <button type="button" class="sn-btn sn-ghost" onclick={(e) => { e.stopPropagation(); onLibrary(); }}>
-        <Books size={13} weight="regular" /> Library
-      </button>
-    </div>
-  </div>
-{/snippet}
-
-{#snippet pageSlot(src: string | null, pg: number | null, side: "left" | "right", alt: string, atStart: boolean, atEnd: boolean)}
+{#snippet pageSlot(src: string | null, pg: number | null, alt: string)}
   {#if src}
     <img {src} {alt} class={imgCls} decoding="async" draggable="false" />
   {:else if pg != null}
     <div class="page-loader" aria-hidden="true">{@render skeleton()}</div>
-  {:else if allowNeighbor(side, atStart, atEnd)}
-    {@render neighbor(side)}
   {:else}
     <div class="spread-void"></div>
   {/if}
@@ -283,16 +226,12 @@
     position: relative;
     background: var(--bg-void);
   }
-  .double-wrap.solo-full {
-    height: auto;
-  }
   .double-wrap.peeling { overflow: hidden; }
   .double-wrap.peeling .slot {
     flex: 1 1 0;
     width: 0;
     min-width: 0;
   }
-  .double-wrap.peeling .spread-neighbor,
   .double-wrap.peeling .spread-void {
     width: 100%;
     height: 100%;
@@ -311,113 +250,12 @@
   .gap-left  { margin-right: var(--spread-gap); }
   .gap-right { margin-left: var(--spread-gap); }
 
-  .spread-neighbor {
-    box-sizing: border-box;
-    position: relative;
-    height: 100%;
-    aspect-ratio: var(--page-aspect, 0.67);
-    width: auto;
-    flex: 0 0 auto;
-    overflow: hidden;
-    background: var(--bg-raised);
-    color: var(--text-secondary);
-  }
-  .sn-peek {
-    position: absolute;
-    inset: -8%;
-    width: 116%;
-    height: 116%;
-    object-fit: cover;
-    opacity: 0.2;
-    filter: blur(2px);
-    pointer-events: none;
-  }
-  .sn-veil {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-  }
-  .sn-left .sn-veil {
-    background: linear-gradient(to right,
-      color-mix(in srgb, var(--accent-dim) 22%, var(--bg-void)) 0%,
-      color-mix(in srgb, var(--bg-void) 40%, transparent) 52%,
-      transparent 100%);
-  }
-  .sn-right .sn-veil {
-    background: linear-gradient(to left,
-      color-mix(in srgb, var(--accent-dim) 22%, var(--bg-void)) 0%,
-      color-mix(in srgb, var(--bg-void) 40%, transparent) 52%,
-      transparent 100%);
-  }
-  .sn-copy {
-    position: relative;
-    z-index: 1;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: stretch;
-    gap: var(--sp-2);
-    padding: var(--sp-5) var(--sp-4);
-  }
   .spread-void {
     height: 100%;
     aspect-ratio: var(--page-aspect, 0.67);
     width: auto;
     flex: 0 0 auto;
   }
-  .sn-kicker {
-    margin: 0;
-    font-family: var(--font-ui);
-    font-size: var(--text-2xs);
-    font-weight: 500;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: var(--text-faint);
-  }
-  .sn-title {
-    margin: 0;
-    font-family: var(--font-ui);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--text-primary);
-    line-height: 1.35;
-    overflow-wrap: anywhere;
-    text-shadow: 0 1px 10px var(--bg-raised);
-  }
-  .sn-ch {
-    margin: 0 0 var(--sp-2);
-    font-family: var(--font-ui);
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    line-height: 1.4;
-    overflow-wrap: anywhere;
-  }
-  .sn-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    width: 100%;
-    padding: 8px;
-    border-radius: var(--radius-md);
-    background: var(--accent-muted);
-    border: 1px solid var(--accent-dim);
-    color: var(--accent-fg);
-    font-size: var(--text-sm);
-    font-family: var(--font-ui);
-    letter-spacing: var(--tracking-wide);
-    cursor: pointer;
-    transition: filter var(--t-base), background var(--t-base), color var(--t-base);
-  }
-  .sn-btn:hover { filter: brightness(1.12); }
-  .sn-ghost {
-    background: none;
-    border-color: var(--border-base);
-    color: var(--text-faint);
-    font-size: var(--text-xs);
-  }
-  .sn-ghost:hover { color: var(--text-muted); filter: none; }
 
   .double-wrap .slot > :global(img) {
     display: block;

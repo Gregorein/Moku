@@ -96,6 +96,13 @@ export function getCachedAspect(url: string): number | undefined {
   return aspectCache.get(url);
 }
 
+// A "page" this thin/wide relative to a normal manga page is almost always a
+// scan artifact (a sliver strip) rather than real content, and pairing it
+// into a double-page spread renders as a blank white gap.
+export function isDegenerateAspect(r: number): boolean {
+  return r < 0.15 || r > 6;
+}
+
 export function clearPageCache(chapterId?: string): void {
   if (chapterId !== undefined) {
     pageCache.delete(chapterId);

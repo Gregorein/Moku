@@ -6,7 +6,6 @@
   import { READ_LINE_PCT }      from "$lib/components/media/manga/lib/scrollHandler";
   import { settingsState }      from "$lib/state/settings.svelte";
   import { tick }               from "svelte";
-  import type { Chapter }       from "$lib/types";
   import LongstripViewer        from "$lib/components/media/manga/viewer/LongstripViewer.svelte";
   import SingleViewer           from "$lib/components/media/manga/viewer/SingleViewer.svelte";
   import DoubleViewer, { type SpreadFlip } from "$lib/components/media/manga/viewer/DoubleViewer.svelte";
@@ -15,8 +14,8 @@
     type FoldHalf,
     PEEL_MS, FLIP_MS, peelGeometry, peelCorner, easeOutCubic, spreadShade,
   } from "$lib/components/media/manga/lib/pagePeel";
-  import { getCachedAspect, spreadLayout } from "$lib/components/media/manga/lib/pageLoader";
-  import { getPagesForChapter } from "$lib/components/media/manga/lib/chapterLoader";
+  import { spreadLayout, buildPageGroups } from "$lib/components/media/manga/lib/pageLoader";
+  import { getPrevPrefetchUrls, getNextPrefetchUrls } from "$lib/components/media/manga/lib/chapterLoader";
 
   export interface StripChapter {
     chapterId:   string;
@@ -62,12 +61,7 @@
     onCenterIdxChange:(flatIdx: number) => void;
     onMarkRead:       (chapterId: string) => void;
     onAppend:         () => void;
-    mangaTitle:        string;
-    prevChapter:       Chapter | null;
-    nextChapter:       Chapter | null;
-    onOpenPrevChapter: () => void;
-    onOpenNextChapter: () => void;
-    onLibrary:         () => void;
+    onCrossBoundary:  (dir: 1 | -1, targetPage: number) => void;
   }
 
   const {
@@ -75,8 +69,7 @@
     pageGroups, currentGroup, turning, turnDir, transition, rtl,
     tapToToggleBar, pinchZoomEnabled, useBlob, barPosition,
     onGetZoom, onSetZoom, resolveUrl, onTap, onWheel, onToggleUi, onSwipe, bindContainer,
-    onPageChange, onChapterChange, onCenterIdxChange, onMarkRead, onAppend,
-    mangaTitle, prevChapter, nextChapter, onOpenPrevChapter, onOpenNextChapter, onLibrary,
+    onPageChange, onChapterChange, onCenterIdxChange, onMarkRead, onAppend, onCrossBoundary,
   }: Props = $props();
 
   let stripChunks = $state<StripChapter[]>([]);
@@ -123,8 +116,6 @@
   let spreadFlip       = $state<SpreadFlip | null>(null);
   let peelRaf          = 0;
   let peelWait         = null as (() => void) | null;
-  let prevPeekSrc      = $state<string | null>(null);
-  let nextPeekSrc      = $state<string | null>(null);
 
   $effect(() => {
     if (style === "longstrip" || !pageReady) return;
@@ -160,43 +151,6 @@
       });
     }
     return () => { cancelled = true; };
-  });
-
-  $effect(() => {
-    if (style !== "double" || !pageReady) {
-      prevPeekSrc = null;
-      nextPeekSrc = null;
-      return;
-    }
-    const pageNum = readerState.pageNumber;
-    const groups  = pageGroups;
-    const gi      = groups.findIndex(g => g.includes(pageNum));
-    const atStart = gi === 0;
-    const atEnd   = gi === groups.length - 1 && gi >= 0;
-    const mangaId = readerState.activeManga?.id;
-    const prev    = prevChapter;
-    const next    = nextChapter;
-    const blob    = useBlob;
-    const resolve = resolveUrl;
-    const ctrl    = new AbortController();
-    if (!atStart || !prev) prevPeekSrc = null;
-    if (!atEnd || !next) nextPeekSrc = null;
-    if (!mangaId) return;
-
-    const load = async (ch: typeof prev, last: boolean) => {
-      if (!ch) return null;
-      const urls = await getPagesForChapter(mangaId, ch.id, blob, ctrl.signal, last ? Math.max(0, (ch.pageCount ?? 1) - 1) : 0);
-      const url  = last ? urls[urls.length - 1] : urls[0];
-      if (!url || ctrl.signal.aborted) return null;
-      return resolve(url, 0);
-    };
-    if (atStart && prev) {
-      load(prev, true).then(src => { if (!ctrl.signal.aborted && src) prevPeekSrc = src; }).catch(() => {});
-    }
-    if (atEnd && next) {
-      load(next, false).then(src => { if (!ctrl.signal.aborted && src) nextPeekSrc = src; }).catch(() => {});
-    }
-    return () => ctrl.abort();
   });
 
   $effect(() => {
@@ -332,19 +286,15 @@
     const toFile   = groups[toGi];
     const fromVis  = rtl ? [...fromFile].reverse() : [...fromFile];
     const toVis    = rtl ? [...toFile].reverse() : [...toFile];
-    const aspectOf = (pg: number) => getCachedAspect(readerState.pageUrls[pg - 1]) ?? 0.67;
-    const fromLay  = spreadLayout(fromVis, rtl, aspectOf);
-    const toLay    = spreadLayout(toVis, rtl, aspectOf);
-    const foldFull = fromLay.full != null || toLay.full != null;
+    const fromLay  = spreadLayout(fromVis, rtl);
+    const toLay    = spreadLayout(toVis, rtl);
 
     const fromRight = rtl ? dir === -1 : dir === 1;
-    if (!foldFull) {
-      if (fromRight && fromLay.right == null) return false;
-      if (!fromRight && fromLay.left == null) return false;
-    }
+    if (fromRight && fromLay.right == null) return false;
+    if (!fromRight && fromLay.left == null) return false;
 
     const corner = peelCorner(dir, rtl);
-    const fold: FoldHalf = foldFull ? "full" : (fromRight ? "right" : "left");
+    const fold: FoldHalf = fromRight ? "right" : "left";
     const box    = measureSpread();
     if (!box) return false;
     const chapterId = readerState.activeChapter?.id;
@@ -361,14 +311,10 @@
       };
       const toLeft       = await srcOf(toLay.left);
       const toRight      = await srcOf(toLay.right);
-      const toFull       = await srcOf(toLay.full);
       const fromLeft     = await srcOf(fromLay.left);
       const fromRightSrc = await srcOf(fromLay.right);
-      const fromFull     = await srcOf(fromLay.full);
-      if (fromLay.full != null && !fromFull) return false;
-      if (toLay.full != null && !toFull) return false;
-      if (!foldFull && fromRight && !fromRightSrc) return false;
-      if (!foldFull && !fromRight && !fromLeft) return false;
+      if (fromRight && !fromRightSrc) return false;
+      if (!fromRight && !fromLeft) return false;
       if (toLay.left != null && !toLeft) return false;
       if (toLay.right != null && !toRight) return false;
       if (readerState.activeChapter?.id !== chapterId) return false;
@@ -376,18 +322,18 @@
 
       spreadFlip = {
         fromRight,
-        foldFull,
+        foldFull:   false,
         boxW:       box.w,
         boxH:       box.h,
         geom:       peelGeometry(corner, 0, box.w, box.h, fold),
         shade:      1,
         underLeft:  toLeft,
         underRight: toRight,
-        underFull:  toFull,
+        underFull:  null,
         outLeft:    fromLeft,
         outRight:   fromRightSrc,
-        outFull:    fromFull,
-        flapSrc:    foldFull ? (fromFull ?? fromRightSrc ?? fromLeft) : (fromRight ? toLeft : toRight),
+        outFull:    null,
+        flapSrc:    fromRight ? toLeft : toRight,
         fromStart:  gi === 0,
         fromEnd:    gi === groups.length - 1,
         toStart:    toGi === 0,
@@ -398,14 +344,115 @@
       if (readerState.activeChapter?.id !== chapterId) return false;
 
       currentGroupSrcs = toVis.map(pg => {
-        if (toLay.full === pg) return toFull;
         if (toLay.left === pg) return toLeft;
         if (toLay.right === pg) return toRight;
-        return toFull ?? toLeft ?? toRight;
+        return toLeft ?? toRight;
       });
       srcGroupKey = toVis.join(",");
       readerState.pageNumber = toFile[0];
       spreadFlip = null;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (peelRaf) cancelAnimationFrame(peelRaf);
+      peelRaf = 0;
+      peelWait?.();
+      peelWait = null;
+      spreadFlip = null;
+      readerState.turning = false;
+    }
+  }
+
+  async function playBoundaryFlip(dir: 1 | -1): Promise<boolean> {
+    const groups = pageGroups;
+    if (!groups.length) return false;
+    const from = readerState.pageNumber;
+    const gi = groups.findIndex(g => g.includes(from));
+    if (gi < 0) return false;
+
+    const fromFile = groups[gi];
+    if (fromFile.length !== 1) return false;
+
+    let adjacentUrls: string[] | null;
+    let toFile: number[];
+    if (dir === 1) {
+      if (gi !== groups.length - 1) return false;
+      adjacentUrls = getNextPrefetchUrls();
+      if (!adjacentUrls) return false;
+      const nextGroups = buildPageGroups(adjacentUrls, settingsState.settings.offsetDoubleSpreads ?? false);
+      toFile = nextGroups.length > 1 ? nextGroups[1] : nextGroups[0];
+    } else {
+      if (gi !== 0) return false;
+      adjacentUrls = getPrevPrefetchUrls();
+      if (!adjacentUrls) return false;
+      const prevGroups = buildPageGroups(adjacentUrls, settingsState.settings.offsetDoubleSpreads ?? false);
+      const last = prevGroups[prevGroups.length - 1];
+      toFile = last.length === 1 && prevGroups.length > 1 ? prevGroups[prevGroups.length - 2] : last;
+    }
+
+    const boundarySrc = dir === 1 ? readerState.boundaryNextSrc : readerState.boundaryPrevSrc;
+    const fromVis = rtl ? [...fromFile].reverse() : [...fromFile];
+    const toVis   = rtl ? [...toFile].reverse()   : [...toFile];
+    const fromLay = spreadLayout(fromVis, rtl);
+    const toLay   = spreadLayout(toVis, rtl);
+
+    const fromRight = rtl ? dir === -1 : dir === 1;
+    const corner = peelCorner(dir, rtl);
+    const fold: FoldHalf = fromRight ? "right" : "left";
+    const box = measureSpread();
+    if (!box) return false;
+    const chapterId = readerState.activeChapter?.id;
+
+    readerState.turnDir = dir;
+    readerState.turning = true;
+
+    try {
+      const srcOfAdjacent = async (pg: number | null): Promise<string | null> => {
+        if (pg == null || !adjacentUrls) return null;
+        const url = adjacentUrls[pg - 1];
+        if (!url) return null;
+        const src = await resolveUrl(url, 999);
+        await waitDecoded(src);
+        return src;
+      };
+
+      const fromLeft     = fromLay.left  != null ? await srcForPage(fromLay.left)  : boundarySrc;
+      const fromRightSrc = fromLay.right != null ? await srcForPage(fromLay.right) : boundarySrc;
+      const toLeft        = await srcOfAdjacent(toLay.left);
+      const toRight       = await srcOfAdjacent(toLay.right);
+      if (fromRight && !fromRightSrc) return false;
+      if (!fromRight && !fromLeft) return false;
+      if (toLay.left != null && !toLeft) return false;
+      if (toLay.right != null && !toRight) return false;
+      if (readerState.activeChapter?.id !== chapterId) return false;
+      if (readerState.pageNumber !== from) return false;
+
+      spreadFlip = {
+        fromRight,
+        foldFull:   false,
+        boxW:       box.w,
+        boxH:       box.h,
+        geom:       peelGeometry(corner, 0, box.w, box.h, fold),
+        shade:      1,
+        underLeft:  toLeft,
+        underRight: toRight,
+        underFull:  null,
+        outLeft:    fromLeft,
+        outRight:   fromRightSrc,
+        outFull:    null,
+        flapSrc:    fromRight ? toLeft : toRight,
+        fromStart:  gi === 0,
+        fromEnd:    gi === groups.length - 1,
+        toStart:    false,
+        toEnd:      false,
+      };
+      await tick();
+      await runSpreadPeelAnim(corner, box.w, box.h, fold);
+      if (readerState.activeChapter?.id !== chapterId) return false;
+
+      spreadFlip = null;
+      onCrossBoundary(dir, toFile[0]);
       return true;
     } catch {
       return false;
@@ -424,7 +471,7 @@
     if (readerState.turning) return false;
     if (readerState.inspectScale > 1) return false;
     if (!pageReady) return false;
-    if (style === "double") return playSpreadFlip(dir);
+    if (style === "double") return (await playSpreadFlip(dir)) || playBoundaryFlip(dir);
     if (style !== "single" && style !== "auto") return false;
     if (!currentSrc) return false;
 
@@ -663,13 +710,12 @@
     <div
       class="page-stage"
       class:turning={turning && transition !== "flip"}
-      style="--turn-x:0;--turn-deg:0deg;--turn-op:{transition === 'none' || transition === 'flip' ? 1 : (turning ? 0 : 1)};--turn-speed:0.1s"
+      style="--turn-x:{transition === 'slide' ? `${turnDir * 40}%` : '0'};--turn-deg:0deg;--turn-op:{transition === 'none' ? 1 : ((transition === 'flip' && !readerState.boundaryFading) ? 1 : (turning ? 0 : 1))};--turn-speed:0.1s"
     >
       {#if style === "double"}
         <DoubleViewer
           {imgCls} {currentGroup} srcs={currentGroupSrcs} {pageGroups} {rtl} flip={spreadFlip}
-          {mangaTitle} {prevChapter} {nextChapter} {onOpenPrevChapter} {onOpenNextChapter} {onLibrary}
-          {prevPeekSrc} {nextPeekSrc}
+          boundaryPrevSrc={readerState.boundaryPrevSrc} boundaryNextSrc={readerState.boundaryNextSrc}
         />
       {:else}
         <SingleViewer {imgCls} src={currentSrc} incomingSrc={incomingPeelSrc} peel={peelGeom} />

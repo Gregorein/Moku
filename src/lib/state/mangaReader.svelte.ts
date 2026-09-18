@@ -8,7 +8,7 @@ import { goto }                                          from "$app/navigation";
 export const PAGE_STYLES   = ["single", "double", "auto", "longstrip"] as const;
 export type  PageStyle     = typeof PAGE_STYLES[number];
 
-export const TRANSITIONS   = ["none", "fade", "flip"] as const;
+export const TRANSITIONS   = ["none", "fade", "slide", "flip"] as const;
 export type  PageTransition = typeof TRANSITIONS[number];
 
 export const ZOOM_STEP = 0.05;
@@ -33,6 +33,9 @@ class ReaderState {
 
   pageUrls          = $state<string[]>([]);
   pageNumber        = $state(1);
+  boundaryPrevSrc   = $state<string | null>(null);
+  boundaryNextSrc   = $state<string | null>(null);
+  boundaryFading    = $state(false);
 
   loading          = $state(true);
   error            = $state<string | null>(null);
@@ -94,6 +97,9 @@ class ReaderState {
     this.stripChapters    = [];
     this.visibleChapterId = null;
     this.turning           = false;
+    this.boundaryPrevSrc   = null;
+    this.boundaryNextSrc   = null;
+    this.boundaryFading    = false;
   }
 
   resetResume() {

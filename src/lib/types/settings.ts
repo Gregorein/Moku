@@ -2,7 +2,7 @@ import { DEFAULT_KEYBINDS, type Keybinds } from '$lib/core/keybinds/defaultBinds
 import type { LibrarySortOption, LibraryStatusFilter, LibraryContentFilter } from '$lib/state/library.svelte'
 
 export type PageStyle = 'single' | 'double' | 'auto' | 'longstrip'
-export type PageTransition = 'none' | 'fade' | 'flip'
+export type PageTransition = 'none' | 'fade' | 'slide' | 'flip'
 export type FitMode = 'width' | 'height' | 'screen' | 'original'
 export type ReadingDirection = 'ltr' | 'rtl'
 export type ChapterSortDir = 'desc' | 'asc'

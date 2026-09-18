@@ -8,16 +8,25 @@ interface Adjacent {
 
 export type PlayPeel = (dir: 1 | -1) => Promise<boolean>;
 
-function advanceGroup(forward: boolean, adjacent: Adjacent, startAtLastPage: () => void) {
+function advanceGroup(
+  forward: boolean,
+  adjacent: Adjacent,
+  startBoundaryForward: () => void,
+  startBoundaryBack: () => void,
+) {
   if (!readerState.pageGroups.length) return;
   const gi = readerState.pageGroups.findIndex(g => g.includes(readerState.pageNumber));
   if (forward) {
     if (gi < readerState.pageGroups.length - 1) readerState.pageNumber = readerState.pageGroups[gi + 1][0];
-    else if (adjacent.next) { readerState.pageNumber = 1; openReader(adjacent.next); }
+    else if (adjacent.next) {
+      if (readerState.pageGroups[gi].length === 1) startBoundaryForward();
+      readerState.pageNumber = 1;
+      openReader(adjacent.next);
+    }
     else closeReader();
   } else {
     if (gi > 0) readerState.pageNumber = readerState.pageGroups[gi - 1][0];
-    else if (adjacent.prev) { startAtLastPage(); openReader(adjacent.prev); }
+    else if (adjacent.prev) { startBoundaryBack(); openReader(adjacent.prev); }
   }
 }
 
@@ -30,6 +39,18 @@ export async function animateTurn(transition: string, dir: 1 | -1, fn: () => voi
   fn();
   await new Promise(r => setTimeout(r, 20));
   readerState.turning = false;
+}
+
+async function fadeAcrossBoundary(dir: 1 | -1, fn: () => void) {
+  if (readerState.turning) return;
+  readerState.turnDir       = dir;
+  readerState.turning       = true;
+  readerState.boundaryFading = true;
+  await new Promise(r => setTimeout(r, 100));
+  fn();
+  await new Promise(r => setTimeout(r, 20));
+  readerState.turning       = false;
+  readerState.boundaryFading = false;
 }
 
 async function tryPeel(
@@ -50,6 +71,7 @@ export function goForward(
   lastPage: number,
   onMaybeMarkRead: () => void,
   startAtLastPage: () => void,
+  startBoundaryForward: () => void,
   playPeel?: PlayPeel,
 ) {
   if (readerState.loading) return;
@@ -60,10 +82,10 @@ export function goForward(
   }
   if (style === "double" && readerState.pageGroups.length) {
     if (transition === "flip") {
-      void tryPeel(1, playPeel, () => advanceGroup(true, adjacent, startAtLastPage));
+      void tryPeel(1, playPeel, () => fadeAcrossBoundary(1, () => advanceGroup(true, adjacent, startBoundaryForward, () => {})));
       return;
     }
-    advanceGroup(true, adjacent, startAtLastPage);
+    advanceGroup(true, adjacent, startBoundaryForward, () => {});
     return;
   }
   if (!readerState.pageUrls.length) return;
@@ -80,7 +102,14 @@ export function goForward(
   } else closeReader();
 }
 
-export function goBack(style: string, transition: string, adjacent: Adjacent, startAtLastPage: () => void, playPeel?: PlayPeel) {
+export function goBack(
+  style: string,
+  transition: string,
+  adjacent: Adjacent,
+  startAtLastPage: () => void,
+  startBoundaryBack: () => void,
+  playPeel?: PlayPeel,
+) {
   if (readerState.loading) return;
   if (readerState.turning) return;
   if (style === "longstrip") {
@@ -89,10 +118,10 @@ export function goBack(style: string, transition: string, adjacent: Adjacent, st
   }
   if (style === "double" && readerState.pageGroups.length) {
     if (transition === "flip") {
-      void tryPeel(-1, playPeel, () => advanceGroup(false, adjacent, startAtLastPage));
+      void tryPeel(-1, playPeel, () => fadeAcrossBoundary(-1, () => advanceGroup(false, adjacent, () => {}, startBoundaryBack)));
       return;
     }
-    advanceGroup(false, adjacent, startAtLastPage);
+    advanceGroup(false, adjacent, () => {}, startBoundaryBack);
     return;
   }
   if (!readerState.pageUrls.length) return;
