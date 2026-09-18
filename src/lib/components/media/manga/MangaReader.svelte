@@ -200,12 +200,14 @@
     );
   }
 
+  const playPeel = (dir: 1 | -1) => pageViewRef?.playPeel(dir) ?? Promise.resolve(false);
+
   const goNext = $derived(rtl
-    ? () => goBack(style, transition, adjacent, startAtLast)
-    : () => goForward(style, transition, adjacent, lastPage, maybeMarkCurrentRead, startAtLast));
+    ? () => goBack(style, transition, adjacent, startAtLast, playPeel)
+    : () => goForward(style, transition, adjacent, lastPage, maybeMarkCurrentRead, startAtLast, playPeel));
   const goPrev = $derived(rtl
-    ? () => goForward(style, transition, adjacent, lastPage, maybeMarkCurrentRead, startAtLast)
-    : () => goBack(style, transition, adjacent, startAtLast));
+    ? () => goForward(style, transition, adjacent, lastPage, maybeMarkCurrentRead, startAtLast, playPeel)
+    : () => goBack(style, transition, adjacent, startAtLast, playPeel));
 
   function handleSwipe(forward: boolean) {
     if (forward) goNext(); else goPrev();
@@ -293,6 +295,7 @@
     const ch = readerState.activeChapter;
     if (ch) {
       untrack(() => {
+        hasNavigated = false;
         const manga = readerState.activeManga;
         if (!manga) return;
         historyState.openSession(
@@ -593,6 +596,21 @@
     onChapterChange={(id) => { visibleChapterId = id; }}
     onCenterIdxChange={(idx) => { pageViewRef?.notifyScrollCenter(idx); }}
     onMarkRead={(id) => { if (settingsState.settings.autoMarkRead ?? true) markChapterRead(id, markedRead) }}
+    mangaTitle={readerState.activeManga?.title ?? ""}
+    prevChapter={adjacent.prev}
+    nextChapter={adjacent.next}
+    onOpenPrevChapter={() => {
+      if (!adjacent.prev) return;
+      startAtLast();
+      readerState.openReader(adjacent.prev, readerState.activeManga);
+    }}
+    onOpenNextChapter={() => {
+      if (!adjacent.next) return;
+      maybeMarkCurrentRead();
+      readerState.pageNumber = 1;
+      readerState.openReader(adjacent.next, readerState.activeManga);
+    }}
+    onLibrary={() => handleCloseReader()}
     onAppend={() => {
       if (appending) return;
       const chunks    = pageViewRef?.getStripChunks() ?? [];

@@ -8,7 +8,7 @@ import { goto }                                          from "$app/navigation";
 export const PAGE_STYLES   = ["single", "double", "auto", "longstrip"] as const;
 export type  PageStyle     = typeof PAGE_STYLES[number];
 
-export const TRANSITIONS   = ["none", "fade", "slide", "flip"] as const;
+export const TRANSITIONS   = ["none", "fade", "flip"] as const;
 export type  PageTransition = typeof TRANSITIONS[number];
 
 export const ZOOM_STEP = 0.05;

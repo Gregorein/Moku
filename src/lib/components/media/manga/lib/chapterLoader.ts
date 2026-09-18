@@ -20,7 +20,7 @@ export function scheduleResumeDismiss() {
 let prefetchedChapterId: string | null = null;
 let prefetchedUrls:      string[]      = [];
 
-async function getPagesForChapter(
+export async function getPagesForChapter(
   mangaId: string,
   chapterId: string,
   useBlob: boolean,
@@ -69,6 +69,7 @@ export async function loadChapter(
     prefetchedUrls      = [];
   }
 
+  const wantLast = startAtLastPage.current;
   startAtLastPage.current = false;
   markedRead.clear();
   readerState.resetForChapter();
@@ -76,7 +77,7 @@ export async function loadChapter(
 
   const bookmark = seriesState.bookmarks.find(b => b.mangaId === mangaId && b.chapterId === id);
   const resumeTo = bookmark ? bookmark.pageNumber : 0;
-  readerState.resumePage      = resumeTo > 1 ? resumeTo : 0;
+  readerState.resumePage      = wantLast ? 0 : (resumeTo > 1 ? resumeTo : 0);
   readerState.resumeDismissed = false;
   readerState.resumeVisible   = false;
 
@@ -90,11 +91,11 @@ export async function loadChapter(
       const hi = Math.min(urls.length, resumeTo + 4);
       preloadBlobUrls(urls.slice(lo, hi), 900);
     }
-    if (startAtLastPage.current)  readerState.pageNumber = urls.length;
+    if (wantLast)                 readerState.pageNumber = urls.length;
     else if (resumeTo > 1)        readerState.pageNumber = Math.min(resumeTo, urls.length || resumeTo);
     readerState.pageReady = true;
     readerState.loading   = false;
-    if (resumeTo > 1) readerState.resumeVisible = true;
+    if (!wantLast && resumeTo > 1) readerState.resumeVisible = true;
 
     if (adjacent.next) {
       prefetchedChapterId = adjacent.next.id;
