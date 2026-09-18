@@ -3,7 +3,7 @@
     X, CaretLeft, CaretRight, CaretUp, CaretDown,
     MagnifyingGlassMinus, MagnifyingGlassPlus,
     Bookmark, Download, GearSix, Sliders,
-    ArrowsOut, ArrowsIn, Minus,
+    ArrowsOut, ArrowsIn,
   } from "phosphor-svelte";
   import { readerState, ZOOM_STEP, ZOOM_MIN, ZOOM_MAX } from "$lib/state/mangaReader.svelte";
   import { tsunagu }           from "$lib/server-adapters/tsunagu";
@@ -89,8 +89,6 @@
     onRestoreZoomAnchor();
   }
 
-  const isTauri = platformService.platform === "tauri";
-
   async function toggleFullscreen() {
     await platformService.toggleFullscreen();
   }
@@ -156,7 +154,11 @@
   }
 
   function onPageInput(e: Event) {
-    pageDraft = (e.currentTarget as HTMLInputElement).value.replace(/\D/g, "");
+    const raw = (e.currentTarget as HTMLInputElement).value.replace(/\D/g, "");
+    if (!raw) { pageDraft = ""; return; }
+    const n = parseInt(raw, 10);
+    const max = visibleChunkLastPage || n;
+    pageDraft = String(Math.min(n, max));
   }
 
   function onPageKey(e: KeyboardEvent) {
@@ -409,16 +411,6 @@
               <span>Fullscreen</span>
             {/if}
           </button>
-          {#if isTauri}
-            <button class="action-row" onclick={() => { readerState.actionsOpen = false; platformService.minimize(); }}>
-              <Minus size={13} weight="regular" />
-              <span>Minimize</span>
-            </button>
-            <button class="action-row action-row-danger" onclick={() => { readerState.actionsOpen = false; platformService.close(); }}>
-              <X size={13} weight="regular" />
-              <span>Close window</span>
-            </button>
-          {/if}
         </div>
       {/if}
 
@@ -764,7 +756,6 @@
     transition: background var(--t-fast), color var(--t-fast);
   }
   .action-row:hover { background: var(--bg-overlay); color: var(--text-primary); }
-  .action-row.action-row-danger:hover { background: color-mix(in srgb, #c0392b 15%, transparent); color: var(--color-error, #e57373); }
 
   .action-divider { height: 1px; background: var(--border-dim); margin: var(--sp-1) 0; }
 

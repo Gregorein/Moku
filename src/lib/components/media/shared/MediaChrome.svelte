@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { X, CaretLeft, CaretRight, CaretDown, GearSix, ArrowsOut, ArrowsIn, Minus, DotsThree } from "phosphor-svelte";
+  import { X, CaretLeft, CaretRight, CaretDown, GearSix, ArrowsOut, ArrowsIn, DotsThree } from "phosphor-svelte";
   import { fly } from "svelte/transition";
   import { cubicIn, cubicOut } from "svelte/easing";
   import { mediaViewState } from "$lib/state/mediaView.svelte";
   import { app } from "$lib/state/app.svelte";
-  import { platformService } from "$lib/platform-service";
   import { onDestroy } from "svelte";
   import type { Snippet } from "svelte";
   import type { Chapter } from "$lib/types";
@@ -38,7 +37,6 @@
   }: Props = $props();
 
   const hidden  = $derived(!mediaViewState.uiVisible);
-  const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
   let menuOpen   = $state(false);
   let pickerOpen = $state(false);
@@ -171,15 +169,6 @@
               <ArrowsOut size={13} weight="regular" /><span>Fullscreen</span>
             {/if}
           </button>
-          {#if isTauri}
-            <div class="action-divider"></div>
-            <button class="action-row" onclick={() => { closeMenu(); platformService.minimize(); }}>
-              <Minus size={13} weight="regular" /><span>Minimize</span>
-            </button>
-            <button class="action-row action-row-danger" onclick={() => { closeMenu(); platformService.close(); }}>
-              <X size={13} weight="regular" /><span>Close window</span>
-            </button>
-          {/if}
         </div>
       {/if}
     </div>
@@ -338,8 +327,6 @@
     transition: background var(--t-fast), color var(--t-fast);
   }
   .action-row:hover { background: var(--bg-raised); color: var(--text-primary); }
-  .action-row-danger:hover { color: var(--color-error); background: color-mix(in srgb, var(--color-error) 10%, transparent); }
-  .action-divider { height: 1px; background: var(--border-dim); margin: 4px 0; }
 
   .bottombar {
     bottom: var(--sp-4); left: 50%; transform: translateX(-50%);
