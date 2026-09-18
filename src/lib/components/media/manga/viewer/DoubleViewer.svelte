@@ -1,27 +1,74 @@
 <script lang="ts">
   import { readerState } from "$lib/state/mangaReader.svelte";
+  import type { Chapter } from "$lib/types";
   import type { PeelGeometry } from "$lib/components/media/manga/lib/pagePeel";
+  import { getCachedAspect, spreadLayout } from "$lib/components/media/manga/lib/pageLoader";
+  import { Books, CaretLeft, CaretRight } from "phosphor-svelte";
 
   export interface SpreadFlip {
     fromRight:  boolean;
+    foldFull:   boolean;
+    boxW:       number;
+    boxH:       number;
     geom:       PeelGeometry;
     shade:      number;
-    underLeft:  string;
-    underRight: string;
-    outLeft:    string;
-    outRight:   string;
-    flapSrc:    string;
+    underLeft:  string | null;
+    underRight: string | null;
+    underFull:  string | null;
+    outLeft:    string | null;
+    outRight:   string | null;
+    outFull:    string | null;
+    flapSrc:    string | null;
   }
 
   interface Props {
-    imgCls:       string;
-    currentGroup: number[];
-    srcs:         (string | null)[];
-    pageGroups:   number[][];
-    flip?:        SpreadFlip | null;
+    imgCls:            string;
+    currentGroup:      number[];
+    srcs:              (string | null)[];
+    pageGroups:        number[][];
+    rtl:               boolean;
+    flip?:             SpreadFlip | null;
+    mangaTitle:        string;
+    prevChapter:       Chapter | null;
+    nextChapter:       Chapter | null;
+    onOpenPrevChapter: () => void;
+    onOpenNextChapter: () => void;
+    onLibrary:         () => void;
   }
 
-  const { imgCls, currentGroup, srcs, pageGroups, flip = null }: Props = $props();
+  const {
+    imgCls, currentGroup, srcs, pageGroups, rtl,
+    flip = null,
+    mangaTitle, prevChapter, nextChapter, onOpenPrevChapter, onOpenNextChapter, onLibrary,
+  }: Props = $props();
+
+  const idle = $derived.by(() => {
+    const layout = spreadLayout(currentGroup, rtl, pg => getCachedAspect(readerState.pageUrls[pg - 1]) ?? 0.67);
+    const srcOf = (pg: number | null) => {
+      if (pg == null) return null;
+      const i = currentGroup.indexOf(pg);
+      return i >= 0 ? srcs[i] ?? null : null;
+    };
+    return {
+      full:     layout.full,
+      leftSrc:  srcOf(layout.left),
+      rightSrc: srcOf(layout.right),
+      fullSrc:  srcOf(layout.full),
+      leftPg:   layout.left,
+      rightPg:  layout.right,
+    };
+  });
+
+  function neighborKind(side: "left" | "right"): "prev" | "next" {
+    const startSide = rtl ? "right" : "left";
+    return side === startSide ? "prev" : "next";
+  }
+
+  const pageAspect = $derived.by(() => {
+    const pg = idle.leftPg ?? idle.rightPg ?? idle.full;
+    if (pg == null) return 2 / 3;
+    return getCachedAspect(readerState.pageUrls[pg - 1]) ?? 2 / 3;
+  });
 </script>
 
 <div
@@ -29,11 +76,26 @@
   style="transform:scale({readerState.inspectScale}) translate({readerState.inspectPanX / readerState.inspectScale}px,{readerState.inspectPanY / readerState.inspectScale}px)"
 >
   {#if pageGroups.length}
-    <div class="double-wrap" class:peeling={!!flip}>
+    <div
+      class="double-wrap"
+      class:peeling={!!flip}
+      class:solo-full={!flip && idle.full != null}
+      style:width={flip ? `${flip.boxW}px` : undefined}
+      style:height={flip ? `${flip.boxH}px` : undefined}
+      style:--page-aspect={pageAspect}
+    >
       {#if flip}
-        <div class="peel-under">
-          <img src={flip.underLeft} alt="" class="{imgCls} page-half gap-left" decoding="async" draggable="false" />
-          <img src={flip.underRight} alt="" class="{imgCls} page-half gap-right" decoding="async" draggable="false" />
+        <div class="peel-under" style:clip-path={flip.geom.holeClip}>
+          {#if flip.underFull}
+            <img src={flip.underFull} alt="" class="{imgCls} page-full" decoding="async" draggable="false" />
+          {:else}
+            <div class="slot gap-left">
+              {@render pageSlot(flip.underLeft, flip.underLeft ? 1 : null, "left", "")}
+            </div>
+            <div class="slot gap-right">
+              {@render pageSlot(flip.underRight, flip.underRight ? 1 : null, "right", "")}
+            </div>
+          {/if}
         </div>
         {#if flip.geom.creaseLength > 4}
           <svg class="peel-page-shadow" viewBox="0 0 {flip.geom.boxW} {flip.geom.boxH}" preserveAspectRatio="none" style:clip-path={flip.geom.holeClip} style:opacity={flip.shade} aria-hidden="true">
@@ -49,22 +111,48 @@
           </svg>
         {/if}
         <div class="peel-out" style:clip-path={flip.geom.outgoingClip}>
-          <img src={flip.outLeft} alt="" class="{imgCls} page-half gap-left" decoding="async" draggable="false" />
-          <img src={flip.outRight} alt="" class="{imgCls} page-half gap-right" decoding="async" draggable="false" />
+          {#if flip.outFull}
+            <img src={flip.outFull} alt="" class="{imgCls} page-full" decoding="async" draggable="false" />
+          {:else}
+            <div class="slot gap-left">
+              {@render pageSlot(flip.outLeft, flip.outLeft ? 1 : null, "left", "")}
+            </div>
+            <div class="slot gap-right">
+              {@render pageSlot(flip.outRight, flip.outRight ? 1 : null, "right", "")}
+            </div>
+          {/if}
         </div>
         {#if flip.geom.creaseLength > 4}
           <div class="peel-flap-wrap" style:clip-path={flip.geom.flapClip}>
             <div class="peel-flap-inner" style:transform={flip.geom.flapTransform}>
-              <img
-                class="peel-flap-img"
-                class:from-right={flip.fromRight}
-                class:from-left={!flip.fromRight}
-                src={flip.flapSrc}
-                alt=""
-                draggable="false"
-                decoding="async"
-                style:filter="brightness({1 + 0.14 * flip.shade}) contrast({1 - 0.1 * flip.shade}) saturate({1 - 0.45 * flip.shade})"
-              />
+              {#if flip.foldFull && flip.outFull && flip.flapSrc}
+                <img class="peel-flap-img sheet" src={flip.flapSrc} alt="" draggable="false" decoding="async"
+                  style:filter="brightness({1 + 0.14 * flip.shade}) contrast({1 - 0.1 * flip.shade}) saturate({1 - 0.45 * flip.shade})" />
+              {:else if flip.foldFull}
+                <div class="slot gap-left">
+                  {#if flip.outLeft}
+                    <img src={flip.outLeft} alt="" class={imgCls} decoding="async" draggable="false"
+                      style:filter="brightness({1 + 0.14 * flip.shade}) contrast({1 - 0.1 * flip.shade}) saturate({1 - 0.45 * flip.shade})" />
+                  {/if}
+                </div>
+                <div class="slot gap-right">
+                  {#if flip.outRight}
+                    <img src={flip.outRight} alt="" class={imgCls} decoding="async" draggable="false"
+                      style:filter="brightness({1 + 0.14 * flip.shade}) contrast({1 - 0.1 * flip.shade}) saturate({1 - 0.45 * flip.shade})" />
+                  {/if}
+                </div>
+              {:else if flip.flapSrc}
+                <img
+                  class="peel-flap-img"
+                  class:from-right={flip.fromRight}
+                  class:from-left={!flip.fromRight}
+                  src={flip.flapSrc}
+                  alt=""
+                  draggable="false"
+                  decoding="async"
+                  style:filter="brightness({1 + 0.14 * flip.shade}) contrast({1 - 0.1 * flip.shade}) saturate({1 - 0.45 * flip.shade})"
+                />
+              {/if}
             </div>
             <div class="peel-flap-paper" style:opacity={flip.shade}></div>
             <svg class="peel-flap-shadow" viewBox="0 0 {flip.geom.boxW} {flip.geom.boxH}" preserveAspectRatio="none" style:opacity={flip.shade} aria-hidden="true">
@@ -80,22 +168,19 @@
             </svg>
           </div>
         {/if}
+      {:else if idle.full != null}
+        {#if idle.fullSrc}
+          <img src={idle.fullSrc} alt="Page {idle.full}" class="{imgCls} page-full" decoding="async" draggable="false" />
+        {:else}
+          <div class="page-loader page-full" aria-hidden="true">{@render skeleton()}</div>
+        {/if}
       {:else}
-        {#each currentGroup as pg, i (pg)}
-          {#if srcs[i]}
-            <img
-              src={srcs[i]}
-              alt="Page {pg}"
-              class="{imgCls} page-half {i === 0 ? 'gap-left' : 'gap-right'}"
-              decoding="async"
-              draggable="false"
-            />
-          {:else}
-            <div class="page-loader page-half {i === 0 ? 'gap-left' : 'gap-right'}" aria-hidden="true">
-              {@render skeleton()}
-            </div>
-          {/if}
-        {/each}
+        <div class="slot gap-left">
+          {@render pageSlot(idle.leftSrc, idle.leftPg, "left", `Page ${idle.leftPg}`)}
+        </div>
+        <div class="slot gap-right">
+          {@render pageSlot(idle.rightSrc, idle.rightPg, "right", `Page ${idle.rightPg}`)}
+        </div>
       {/if}
     </div>
   {:else}
@@ -104,6 +189,41 @@
     </div>
   {/if}
 </div>
+
+{#snippet neighbor(side: "left" | "right")}
+  {@const kind = neighborKind(side)}
+  {@const chapter = kind === "next" ? nextChapter : prevChapter}
+  {@const onOpen = kind === "next" ? onOpenNextChapter : onOpenPrevChapter}
+  <div class="spread-neighbor">
+    <p class="sn-kicker">{kind === "next" ? "Next" : "Previous"}</p>
+    <p class="sn-title">{mangaTitle}</p>
+    {#if chapter}
+      <p class="sn-ch">{chapter.name}</p>
+      <button type="button" class="sn-btn" onclick={(e) => { e.stopPropagation(); onOpen(); }}>
+        {#if kind === "next"}
+          Open <CaretRight size={12} weight="bold" />
+        {:else}
+          <CaretLeft size={12} weight="bold" /> Open
+        {/if}
+      </button>
+    {:else}
+      <p class="sn-ch">{kind === "next" ? "End of series" : "Start of series"}</p>
+    {/if}
+    <button type="button" class="sn-btn sn-ghost" onclick={(e) => { e.stopPropagation(); onLibrary(); }}>
+      <Books size={13} weight="regular" /> Library
+    </button>
+  </div>
+{/snippet}
+
+{#snippet pageSlot(src: string | null, pg: number | null, side: "left" | "right", alt: string)}
+  {#if src}
+    <img {src} {alt} class={imgCls} decoding="async" draggable="false" />
+  {:else if pg != null}
+    <div class="page-loader" aria-hidden="true">{@render skeleton()}</div>
+  {:else}
+    {@render neighbor(side)}
+  {/if}
+{/snippet}
 
 {#snippet skeleton()}
   <svg class="panel-skeleton" viewBox="0 0 100 150" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
@@ -117,9 +237,11 @@
 
 <style>
   .inspect-wrap {
+    --spread-h: calc(var(--visual-vh, 100vh) - 80px);
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 100%;
     transform-origin: center center;
     will-change: transform;
   }
@@ -127,22 +249,135 @@
   .double-wrap {
     --spread-gap: 2px;
     display: flex;
-    align-items: flex-start;
+    align-items: stretch;
     justify-content: center;
-    max-width: calc(var(--effective-width, 100%) * 2);
-    width: 100%;
+    width: max-content;
+    height: var(--spread-h);
+    max-height: var(--spread-h);
     position: relative;
+    background: var(--bg-void);
+  }
+  .double-wrap.solo-full {
+    height: auto;
   }
   .double-wrap.peeling { overflow: hidden; }
+  .double-wrap.peeling .slot {
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
+  }
+  .double-wrap.peeling .spread-neighbor {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+  }
 
-  .page-half { flex: 1; min-width: 0; object-fit: contain; }
+  .slot {
+    flex: 0 0 auto;
+    height: 100%;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    overflow: hidden;
+    background: var(--bg-void);
+  }
   .gap-left  { margin-right: var(--spread-gap); }
   .gap-right { margin-left: var(--spread-gap); }
 
+  .spread-neighbor {
+    box-sizing: border-box;
+    height: 100%;
+    aspect-ratio: var(--page-aspect, 0.67);
+    width: auto;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: stretch;
+    gap: var(--sp-2);
+    padding: var(--sp-5) var(--sp-4);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-dim);
+    color: var(--text-secondary);
+  }
+  .sn-kicker {
+    margin: 0;
+    font-family: var(--font-ui);
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .sn-title {
+    margin: 0;
+    font-family: var(--font-ui);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .sn-ch {
+    margin: 0 0 var(--sp-2);
+    font-family: var(--font-ui);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  .sn-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 100%;
+    padding: 8px;
+    border-radius: var(--radius-md);
+    background: var(--accent-muted);
+    border: 1px solid var(--accent-dim);
+    color: var(--accent-fg);
+    font-size: var(--text-sm);
+    font-family: var(--font-ui);
+    letter-spacing: var(--tracking-wide);
+    cursor: pointer;
+    transition: filter var(--t-base), background var(--t-base), color var(--t-base);
+  }
+  .sn-btn:hover { filter: brightness(1.12); }
+  .sn-ghost {
+    background: none;
+    border-color: var(--border-base);
+    color: var(--text-faint);
+    font-size: var(--text-xs);
+  }
+  .sn-ghost:hover { color: var(--text-muted); filter: none; }
+
+  .double-wrap .slot > :global(img) {
+    display: block;
+    height: 100%;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    object-fit: contain;
+  }
+  .page-full {
+    display: block;
+    max-height: var(--spread-h);
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
+  .double-wrap.peeling .page-full,
+  .double-wrap.peeling .slot > :global(img) {
+    max-width: 100%;
+    max-height: 100%;
+    height: 100%;
+    width: auto;
+  }
+
   .peel-under, .peel-out {
     display: flex;
-    align-items: flex-start;
-    width: 100%;
+    align-items: stretch;
   }
   .peel-under {
     position: absolute;
@@ -150,7 +385,12 @@
     z-index: 0;
     pointer-events: none;
   }
-  .peel-out { position: relative; z-index: 2; }
+  .peel-out {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    height: 100%;
+  }
 
   .peel-page-shadow, .peel-flap-shadow {
     position: absolute;
@@ -178,11 +418,15 @@
     width: calc(50% - var(--spread-gap));
     height: 100%;
     object-fit: contain;
-    /* Verso sits mirrored in the folding slot so the crease reflection lands it upright. */
     transform: scaleX(-1);
   }
   .peel-flap-img.from-right { margin-left: auto; }
   .peel-flap-img.from-left  { margin-right: auto; }
+  .peel-flap-img.sheet {
+    width: 100%;
+    height: 100%;
+    transform: none;
+  }
 
   .peel-flap-paper {
     position: absolute;
@@ -192,12 +436,22 @@
 
   .center-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 
-  .page-loader { border-radius: var(--radius-sm); display: flex; align-items: stretch; }
+  .page-loader {
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: stretch;
+    aspect-ratio: 2 / 3;
+    height: var(--spread-h);
+    max-height: var(--spread-h);
+    width: auto;
+    max-width: calc((var(--effective-width, 100vw) - 4px) / 2);
+  }
   .page-loader-single {
     width: min(100%, var(--effective-width, 100%));
     max-width: var(--effective-width, 100%);
-    max-height: calc(var(--visual-vh, 100vh) - 80px);
+    max-height: var(--spread-h);
     aspect-ratio: 2 / 3;
+    height: auto;
   }
 
   .panel-skeleton { width: 100%; height: 100%; }

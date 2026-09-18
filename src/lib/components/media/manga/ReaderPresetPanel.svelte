@@ -103,7 +103,6 @@
   const transitionOptions: { value: string; label: string; icon: any }[] = [
     { value: "none",  label: "None",  icon: Prohibit },
     { value: "fade",  label: "Fade",  icon: MonitorPlay },
-    { value: "slide", label: "Slide", icon: ArrowsHorizontal },
     { value: "flip",  label: "Turn",  icon: ArrowsLeftRight },
   ];
 

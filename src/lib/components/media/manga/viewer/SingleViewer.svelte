@@ -17,7 +17,10 @@
   style="transform:scale({readerState.inspectScale}) translate({readerState.inspectPanX / readerState.inspectScale}px,{readerState.inspectPanY / readerState.inspectScale}px)"
 >
   {#if src}
-    <div class="peel-stack" class:peeling={!!peel}>
+    <div
+      class="peel-stack"
+      class:peeling={!!peel}
+    >
       {#if peel && incomingSrc}
         <img
           class="peel-under"
@@ -25,6 +28,7 @@
           alt=""
           draggable="false"
           decoding="async"
+          style:clip-path={peel.holeClip}
         />
         <svg class="peel-page-shadow" viewBox="0 0 {peel.boxW} {peel.boxH}" preserveAspectRatio="none" style:clip-path={peel.holeClip} aria-hidden="true">
           <defs>
@@ -89,10 +93,10 @@
 <style>
   .inspect-wrap { display: flex; align-items: center; justify-content: center; transform-origin: center center; will-change: transform; }
 
-  .peel-stack { position: relative; display: flex; align-items: center; justify-content: center; }
+  .peel-stack { position: relative; display: flex; align-items: center; justify-content: center; background: var(--bg-void); }
   .peel-stack.peeling { overflow: hidden; }
 
-  .peel-front { position: relative; z-index: 2; }
+  .peel-front { position: relative; z-index: 2; max-width: 100%; max-height: 100%; object-fit: contain; }
 
   .peel-under {
     position: absolute;
@@ -100,7 +104,7 @@
     z-index: 0;
     width: 100%;
     height: 100%;
-    object-fit: fill;
+    object-fit: contain;
     pointer-events: none;
   }
 
@@ -127,7 +131,7 @@
     inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: fill;
+    object-fit: contain;
     transform-origin: 0 0;
     filter: brightness(1.14) contrast(0.9) saturate(0.55);
   }

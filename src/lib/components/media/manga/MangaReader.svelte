@@ -595,6 +595,21 @@
     onChapterChange={(id) => { visibleChapterId = id; }}
     onCenterIdxChange={(idx) => { pageViewRef?.notifyScrollCenter(idx); }}
     onMarkRead={(id) => { if (settingsState.settings.autoMarkRead ?? true) markChapterRead(id, markedRead) }}
+    mangaTitle={readerState.activeManga?.title ?? ""}
+    prevChapter={adjacent.prev}
+    nextChapter={adjacent.next}
+    onOpenPrevChapter={() => {
+      if (!adjacent.prev) return;
+      startAtLast();
+      readerState.openReader(adjacent.prev, readerState.activeManga);
+    }}
+    onOpenNextChapter={() => {
+      if (!adjacent.next) return;
+      maybeMarkCurrentRead();
+      readerState.pageNumber = 1;
+      readerState.openReader(adjacent.next, readerState.activeManga);
+    }}
+    onLibrary={() => handleCloseReader()}
     onAppend={() => {
       if (appending) return;
       const chunks    = pageViewRef?.getStripChunks() ?? [];

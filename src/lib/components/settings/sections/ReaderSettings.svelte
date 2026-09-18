@@ -21,7 +21,7 @@
   let triggerBarPos     = $state<HTMLButtonElement>(null!)
 
   const BAR_POS_LABELS = { top: 'Top', left: 'Left', right: 'Right' } as const
-  const TRANSITION_LABELS = { none: 'None', fade: 'Fade', slide: 'Slide', flip: 'Turn' } as const
+  const TRANSITION_LABELS = { none: 'None', fade: 'Fade', flip: 'Turn' } as const
 
   $effect(() => { if (triggerPageStyle)  registerTrigger('page-style',  triggerPageStyle)  })
   $effect(() => { if (triggerTransition) registerTrigger('transition',  triggerTransition) })
@@ -60,7 +60,7 @@
           </button>
           {#if selectOpen === 'transition' || closingSelect === 'transition'}
             <div use:selectPortal={getTrigger('transition')} class="s-select-menu" class:anims class:closing={closingSelect === 'transition'}>
-              {#each [['none','None'],['fade','Fade'],['slide','Slide'],['flip','Turn']] as [v, l]}
+              {#each [['none','None'],['fade','Fade'],['flip','Turn']] as [v, l]}
                 <button class="s-select-option" class:active={(settingsState.settings.transition ?? 'none') === v} onclick={() => { updateSettings({ transition: v as Settings['transition'] }); toggleSelect('transition') }}>{l}</button>
               {/each}
             </div>

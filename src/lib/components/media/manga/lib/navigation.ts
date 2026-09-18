@@ -26,7 +26,7 @@ export async function animateTurn(transition: string, dir: 1 | -1, fn: () => voi
   if (readerState.turning) return;
   readerState.turnDir = dir;
   readerState.turning = true;
-  await new Promise(r => setTimeout(r, transition === "fade" ? 100 : 160));
+  await new Promise(r => setTimeout(r, 100));
   fn();
   await new Promise(r => setTimeout(r, 20));
   readerState.turning = false;
