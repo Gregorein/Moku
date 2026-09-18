@@ -38,12 +38,15 @@
     onOpenPrevChapter: () => void;
     onOpenNextChapter: () => void;
     onLibrary:         () => void;
+    prevPeekSrc?:      string | null;
+    nextPeekSrc?:      string | null;
   }
 
   const {
     imgCls, currentGroup, srcs, pageGroups, rtl,
     flip = null,
     mangaTitle, prevChapter, nextChapter, onOpenPrevChapter, onOpenNextChapter, onLibrary,
+    prevPeekSrc = null, nextPeekSrc = null,
   }: Props = $props();
 
   const idle = $derived.by(() => {
@@ -207,24 +210,32 @@
   {@const kind = neighborKind(side)}
   {@const chapter = kind === "next" ? nextChapter : prevChapter}
   {@const onOpen = kind === "next" ? onOpenNextChapter : onOpenPrevChapter}
-  <div class="spread-neighbor">
-    <p class="sn-kicker">{kind === "next" ? "Next" : "Previous"}</p>
-    <p class="sn-title">{mangaTitle}</p>
-    {#if chapter}
-      <p class="sn-ch">{chapter.name}</p>
-      <button type="button" class="sn-btn" onclick={(e) => { e.stopPropagation(); onOpen(); }}>
-        {#if kind === "next"}
-          Open <CaretRight size={12} weight="bold" />
-        {:else}
-          <CaretLeft size={12} weight="bold" /> Open
-        {/if}
-      </button>
-    {:else}
-      <p class="sn-ch">{kind === "next" ? "End of series" : "Start of series"}</p>
+  {@const peekSrc = kind === "next" ? nextPeekSrc : prevPeekSrc}
+  <div class="spread-neighbor" class:sn-left={side === "left"} class:sn-right={side === "right"}>
+    {#if peekSrc}
+      <img class="sn-peek" src={peekSrc} alt="" draggable="false" decoding="async" />
     {/if}
-    <button type="button" class="sn-btn sn-ghost" onclick={(e) => { e.stopPropagation(); onLibrary(); }}>
-      <Books size={13} weight="regular" /> Library
-    </button>
+    <div class="sn-veil"></div>
+    <div class="sn-copy">
+      {#if chapter}
+        <p class="sn-kicker">{kind === "next" ? "Next" : "Previous"}</p>
+        <p class="sn-title">{mangaTitle}</p>
+        <p class="sn-ch">{chapter.name}</p>
+        <button type="button" class="sn-btn" onclick={(e) => { e.stopPropagation(); onOpen(); }}>
+          {#if kind === "next"}
+            Continue <CaretRight size={12} weight="bold" />
+          {:else}
+            <CaretLeft size={12} weight="bold" /> Continue
+          {/if}
+        </button>
+      {:else}
+        <p class="sn-kicker">{kind === "next" ? "End of series" : "Beginning"}</p>
+        <p class="sn-title">{mangaTitle}</p>
+      {/if}
+      <button type="button" class="sn-btn sn-ghost" onclick={(e) => { e.stopPropagation(); onLibrary(); }}>
+        <Books size={13} weight="regular" /> Library
+      </button>
+    </div>
   </div>
 {/snippet}
 
@@ -302,19 +313,52 @@
 
   .spread-neighbor {
     box-sizing: border-box;
+    position: relative;
     height: 100%;
     aspect-ratio: var(--page-aspect, 0.67);
     width: auto;
     flex: 0 0 auto;
+    overflow: hidden;
+    background: var(--bg-raised);
+    color: var(--text-secondary);
+  }
+  .sn-peek {
+    position: absolute;
+    inset: -8%;
+    width: 116%;
+    height: 116%;
+    object-fit: cover;
+    opacity: 0.2;
+    filter: blur(2px);
+    pointer-events: none;
+  }
+  .sn-veil {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .sn-left .sn-veil {
+    background: linear-gradient(to right,
+      color-mix(in srgb, var(--accent-dim) 22%, var(--bg-void)) 0%,
+      color-mix(in srgb, var(--bg-void) 40%, transparent) 52%,
+      transparent 100%);
+  }
+  .sn-right .sn-veil {
+    background: linear-gradient(to left,
+      color-mix(in srgb, var(--accent-dim) 22%, var(--bg-void)) 0%,
+      color-mix(in srgb, var(--bg-void) 40%, transparent) 52%,
+      transparent 100%);
+  }
+  .sn-copy {
+    position: relative;
+    z-index: 1;
+    height: 100%;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: stretch;
     gap: var(--sp-2);
     padding: var(--sp-5) var(--sp-4);
-    background: var(--bg-raised);
-    border: 1px solid var(--border-dim);
-    color: var(--text-secondary);
   }
   .spread-void {
     height: 100%;
@@ -339,6 +383,7 @@
     color: var(--text-primary);
     line-height: 1.35;
     overflow-wrap: anywhere;
+    text-shadow: 0 1px 10px var(--bg-raised);
   }
   .sn-ch {
     margin: 0 0 var(--sp-2);

@@ -295,6 +295,7 @@
     const ch = readerState.activeChapter;
     if (ch) {
       untrack(() => {
+        hasNavigated = false;
         const manga = readerState.activeManga;
         if (!manga) return;
         historyState.openSession(

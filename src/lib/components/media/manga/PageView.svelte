@@ -15,6 +15,7 @@
     PEEL_MS, FLIP_MS, peelGeometry, peelCorner, easeOutCubic, spreadShade,
   } from "$lib/components/media/manga/lib/pagePeel";
   import { getCachedAspect, spreadLayout } from "$lib/components/media/manga/lib/pageLoader";
+  import { getPagesForChapter } from "$lib/components/media/manga/lib/chapterLoader";
 
   export interface StripChapter {
     chapterId:   string;
@@ -121,6 +122,8 @@
   let spreadFlip       = $state<SpreadFlip | null>(null);
   let peelRaf          = 0;
   let peelWait         = null as (() => void) | null;
+  let prevPeekSrc      = $state<string | null>(null);
+  let nextPeekSrc      = $state<string | null>(null);
 
   $effect(() => {
     if (style === "longstrip" || !pageReady) return;
@@ -156,6 +159,43 @@
       });
     }
     return () => { cancelled = true; };
+  });
+
+  $effect(() => {
+    if (style !== "double" || !pageReady) {
+      prevPeekSrc = null;
+      nextPeekSrc = null;
+      return;
+    }
+    const pageNum = readerState.pageNumber;
+    const groups  = pageGroups;
+    const gi      = groups.findIndex(g => g.includes(pageNum));
+    const atStart = gi === 0;
+    const atEnd   = gi === groups.length - 1 && gi >= 0;
+    const mangaId = readerState.activeManga?.id;
+    const prev    = prevChapter;
+    const next    = nextChapter;
+    const blob    = useBlob;
+    const resolve = resolveUrl;
+    const ctrl    = new AbortController();
+    if (!atStart || !prev) prevPeekSrc = null;
+    if (!atEnd || !next) nextPeekSrc = null;
+    if (!mangaId) return;
+
+    const load = async (ch: typeof prev, last: boolean) => {
+      if (!ch) return null;
+      const urls = await getPagesForChapter(mangaId, ch.id, blob, ctrl.signal, last ? Math.max(0, (ch.pageCount ?? 1) - 1) : 0);
+      const url  = last ? urls[urls.length - 1] : urls[0];
+      if (!url || ctrl.signal.aborted) return null;
+      return resolve(url, 0);
+    };
+    if (atStart && prev) {
+      load(prev, true).then(src => { if (!ctrl.signal.aborted && src) prevPeekSrc = src; }).catch(() => {});
+    }
+    if (atEnd && next) {
+      load(next, false).then(src => { if (!ctrl.signal.aborted && src) nextPeekSrc = src; }).catch(() => {});
+    }
+    return () => ctrl.abort();
   });
 
   $effect(() => {
@@ -740,6 +780,7 @@
         <DoubleViewer
           {imgCls} {currentGroup} srcs={currentGroupSrcs} {pageGroups} {rtl} flip={spreadFlip}
           {mangaTitle} {prevChapter} {nextChapter} {onOpenPrevChapter} {onOpenNextChapter} {onLibrary}
+          {prevPeekSrc} {nextPeekSrc}
         />
       {:else}
         <SingleViewer {imgCls} src={currentSrc} incomingSrc={incomingPeelSrc} peel={peelGeom} />
