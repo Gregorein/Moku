@@ -50,8 +50,4 @@ Thumbs.db
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
-# Local scratch, not for upstream
-TODO.md
-build-appimage.sh
-
 *.code-workspace
