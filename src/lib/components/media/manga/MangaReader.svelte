@@ -150,7 +150,7 @@
     if (hideTimer) clearTimeout(hideTimer);
     if (!tapToToggleBar) {
       hideTimer = setTimeout(() => {
-        if (!readerState.winOpen) readerState.uiVisible = false;
+        if (!readerState.holdUi) readerState.uiVisible = false;
       }, 3000);
     }
   }
@@ -418,7 +418,7 @@
   });
 
   $effect(() => {
-    if (readerState.winOpen) {
+    if (readerState.holdUi) {
       readerState.uiVisible = true;
       if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     }
@@ -542,6 +542,7 @@
     onApplySettings={applySettings}
     onSettingsOpen={() => { app.setSettingsOpen(true); }}
     onOpenPreview={() => { if (readerState.activeManga) setPreviewManga(readerState.activeManga); }}
+    onJumpToPage={(p) => primedJump(p)}
     {perMangaEnabled}
   />
 

@@ -22,7 +22,9 @@ export function createBarReveal(opts: BarRevealOptions = {}) {
   function show() {
     mediaViewState.uiVisible = true;
     clearHide();
-    if (!tapMode()) hideTimer = setTimeout(() => { mediaViewState.uiVisible = false; }, hideMs);
+    if (!tapMode()) hideTimer = setTimeout(() => {
+      if (!mediaViewState.holdUi) mediaViewState.uiVisible = false;
+    }, hideMs);
   }
 
   function hide() {

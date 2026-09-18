@@ -963,6 +963,9 @@
     onNext={nav.goNext}
     onClose={nav.close}
     onOpenPreview={() => { if (manga) setPreviewManga(manga); }}
+    chapters={seriesState.readerChapterList}
+    currentChapterId={chapter?.id ?? null}
+    onSelectChapter={(ch) => nav.open(ch)}
     showBottomBar={false}
   >
     {#snippet endControls()}

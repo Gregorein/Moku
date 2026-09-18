@@ -44,11 +44,18 @@ class ReaderState {
   uiVisible        = $state(true);
   isFullscreen     = $state(false);
 
-  dlOpen           = $state(false);
-  zoomOpen         = $state(false);
-  winOpen          = $state(false);
-  presetOpen       = $state(false);
-  actionsOpen      = $state(false);
+  dlOpen             = $state(false);
+  zoomOpen           = $state(false);
+  winOpen            = $state(false);
+  presetOpen         = $state(false);
+  actionsOpen        = $state(false);
+  chapterPickerOpen  = $state(false);
+  pageInputFocused   = $state(false);
+
+  readonly holdUi = $derived(
+    this.chapterPickerOpen || this.pageInputFocused || this.winOpen ||
+    this.zoomOpen || this.actionsOpen || this.dlOpen || this.presetOpen
+  );
   nextN            = $state(5);
   dlBusy           = $state(false);
 
@@ -108,11 +115,12 @@ class ReaderState {
   }
 
   closeAllPopovers(): boolean {
-    if (this.zoomOpen)    { this.zoomOpen    = false; return true; }
-    if (this.dlOpen)      { this.dlOpen      = false; return true; }
-    if (this.winOpen)     { this.winOpen     = false; return true; }
-    if (this.presetOpen)  { this.presetOpen  = false; return true; }
-    if (this.actionsOpen) { this.actionsOpen = false; return true; }
+    if (this.chapterPickerOpen) { this.chapterPickerOpen = false; return true; }
+    if (this.zoomOpen)          { this.zoomOpen          = false; return true; }
+    if (this.dlOpen)            { this.dlOpen            = false; return true; }
+    if (this.winOpen)           { this.winOpen           = false; return true; }
+    if (this.presetOpen)        { this.presetOpen        = false; return true; }
+    if (this.actionsOpen)       { this.actionsOpen       = false; return true; }
     return false;
   }
 
