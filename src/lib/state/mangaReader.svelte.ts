@@ -34,6 +34,9 @@ class ReaderState {
 
   pageUrls          = $state<string[]>([]);
   pageNumber        = $state(1);
+  boundaryPrevSrc   = $state<string | null>(null);
+  boundaryNextSrc   = $state<string | null>(null);
+  boundaryFading    = $state(false);
 
   loading          = $state(true);
   error            = $state<string | null>(null);
@@ -101,6 +104,9 @@ class ReaderState {
     this.stripChapters    = [];
     this.visibleChapterId = null;
     this.turning           = false;
+    this.boundaryPrevSrc   = null;
+    this.boundaryNextSrc   = null;
+    this.boundaryFading    = false;
   }
 
   resetResume() {

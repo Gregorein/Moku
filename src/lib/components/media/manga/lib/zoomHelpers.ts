@@ -1,5 +1,8 @@
 import { ZOOM_MIN, ZOOM_MAX } from "$lib/state/mangaReader.svelte";
 
+export const INSPECT_ZOOM_MAX  = 8;
+export const INSPECT_ZOOM_STEP = 0.15;
+
 export function clampZoom(z: number): number {
   return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
 }

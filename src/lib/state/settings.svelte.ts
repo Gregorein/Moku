@@ -18,4 +18,3 @@ export function updateSettings(patch: Partial<Settings>) {
   Object.assign(settingsState.settings, patch)
   void saveSettings({ storeVersion: 2, settings: settingsState.settings })
 }
-

@@ -104,7 +104,7 @@
     { value: "none",  label: "None",  icon: Prohibit },
     { value: "fade",  label: "Fade",  icon: MonitorPlay },
     { value: "slide", label: "Slide", icon: ArrowsHorizontal },
-    { value: "flip",  label: "Flip",  icon: ArrowsLeftRight },
+    { value: "flip",  label: "Turn",  icon: ArrowsLeftRight },
   ];
 
   const autoScroll = $derived(settingsState.settings.autoScroll ?? false);

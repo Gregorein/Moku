@@ -2,11 +2,20 @@
   import { readerState }        from "$lib/state/mangaReader.svelte";
   import { createPinchTracker } from "$lib/components/media/manga/lib/pinchZoom";
   import type { PinchTracker }  from "$lib/components/media/manga/lib/pinchZoom";
+  import { createPageGestures } from "$lib/components/media/manga/lib/inspectGestures";
   import { READ_LINE_PCT }      from "$lib/components/media/manga/lib/scrollHandler";
   import { settingsState }      from "$lib/state/settings.svelte";
+  import { tick }               from "svelte";
   import LongstripViewer        from "$lib/components/media/manga/viewer/LongstripViewer.svelte";
   import SingleViewer           from "$lib/components/media/manga/viewer/SingleViewer.svelte";
-  import DoubleViewer           from "$lib/components/media/manga/viewer/DoubleViewer.svelte";
+  import DoubleViewer, { type SpreadFlip } from "$lib/components/media/manga/viewer/DoubleViewer.svelte";
+  import {
+    type PeelGeometry,
+    type FoldHalf,
+    PEEL_MS, FLIP_MS, peelGeometry, peelCorner, easeOutCubic, spreadShade,
+  } from "$lib/components/media/manga/lib/pagePeel";
+  import { spreadLayout, buildPageGroups } from "$lib/components/media/manga/lib/pageLoader";
+  import { getPrevPrefetchUrls, getNextPrefetchUrls } from "$lib/components/media/manga/lib/chapterLoader";
 
   export interface StripChapter {
     chapterId:   string;
@@ -52,6 +61,7 @@
     onCenterIdxChange:(flatIdx: number) => void;
     onMarkRead:       (chapterId: string) => void;
     onAppend:         () => void;
+    onCrossBoundary:  (dir: 1 | -1, targetPage: number) => void;
   }
 
   const {
@@ -59,7 +69,7 @@
     pageGroups, currentGroup, turning, turnDir, transition, rtl,
     tapToToggleBar, pinchZoomEnabled, useBlob, barPosition,
     onGetZoom, onSetZoom, resolveUrl, onTap, onWheel, onToggleUi, onSwipe, bindContainer,
-    onPageChange, onChapterChange, onCenterIdxChange, onMarkRead, onAppend,
+    onPageChange, onChapterChange, onCenterIdxChange, onMarkRead, onAppend, onCrossBoundary,
   }: Props = $props();
 
   let stripChunks = $state<StripChapter[]>([]);
@@ -98,30 +108,418 @@
 
   let currentSrc       = $state<string | null>(null);
   let currentGroupSrcs = $state<(string | null)[]>([]);
+  let srcPage          = 0;
+  let srcUrl           = "";
+  let srcGroupKey      = "";
+  let incomingPeelSrc  = $state<string | null>(null);
+  let peelGeom         = $state<PeelGeometry | null>(null);
+  let spreadFlip       = $state<SpreadFlip | null>(null);
+  let peelRaf          = 0;
+  let peelWait         = null as (() => void) | null;
 
   $effect(() => {
     if (style === "longstrip" || !pageReady) return;
     const pageNum = readerState.pageNumber;
     const urls    = readerState.pageUrls;
     const group   = currentGroup;
-    currentSrc       = null;
-    currentGroupSrcs = group.map(() => null);
     let cancelled = false;
     if (style === "double") {
+      const key = group.join(",");
+      if (srcGroupKey === key && currentGroupSrcs.length === group.length && currentGroupSrcs.every(Boolean)) return;
+      currentGroupSrcs = group.map(() => null);
+      srcGroupKey = "";
       group.forEach((pg, i) => {
         const url = urls[pg - 1];
         if (!url) return;
         resolveUrl(url, 999).then(src => {
           if (cancelled) return;
           currentGroupSrcs = currentGroupSrcs.map((s, j) => j === i ? src : s);
+          if (currentGroupSrcs.length === group.length && currentGroupSrcs.every(Boolean)) srcGroupKey = key;
         });
       });
     } else {
       const url = urls[pageNum - 1];
-      if (url) resolveUrl(url, 999).then(src => { if (!cancelled) currentSrc = src; });
+      if (!url) { currentSrc = null; srcPage = 0; srcUrl = ""; return; }
+      if (srcPage === pageNum && srcUrl === url && currentSrc) return;
+      currentSrc = null;
+      srcPage = 0;
+      resolveUrl(url, 999).then(src => {
+        if (cancelled) return;
+        currentSrc = src;
+        srcPage = pageNum;
+        srcUrl = url;
+      });
     }
     return () => { cancelled = true; };
   });
+
+  $effect(() => {
+    if (style === "longstrip" || !currentSrc) return;
+    const n    = readerState.pageNumber;
+    const urls = readerState.pageUrls;
+    for (const url of [urls[n], urls[n - 2]]) {
+      if (!url) continue;
+      const img = new Image();
+      img.src = url;
+    }
+  });
+
+  $effect(() => {
+    void readerState.activeChapter?.id;
+    return () => {
+      if (peelRaf) cancelAnimationFrame(peelRaf);
+      peelRaf = 0;
+      peelWait?.();
+      peelWait = null;
+      peelGeom = null;
+      incomingPeelSrc = null;
+      spreadFlip = null;
+    };
+  });
+
+  function waitDecoded(src: string): Promise<void> {
+    const img = new Image();
+    img.src = src;
+    if (typeof img.decode === "function") {
+      return img.decode().catch(() => {});
+    }
+    return new Promise(resolve => {
+      img.onload = () => resolve();
+      img.onerror = () => resolve();
+    });
+  }
+
+  function measureOutgoing(): { w: number; h: number } | null {
+    const img = containerEl?.querySelector<HTMLElement>(".peel-stack > img.peel-front");
+    if (!img) return null;
+    const w = img.offsetWidth;
+    const h = img.offsetHeight;
+    if (w < 8 || h < 8) return null;
+    return { w, h };
+  }
+
+  function runPeelAnim(corner: ReturnType<typeof peelCorner>, w: number, h: number): Promise<void> {
+    return new Promise(resolve => {
+      const t0 = performance.now();
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (peelRaf) cancelAnimationFrame(peelRaf);
+        peelRaf = 0;
+        peelWait = null;
+        resolve();
+      };
+      peelWait = finish;
+      const frame = (now: number) => {
+        const t = Math.min(1, (now - t0) / PEEL_MS);
+        peelGeom = peelGeometry(corner, easeOutCubic(t), w, h);
+        if (t < 1) {
+          peelRaf = requestAnimationFrame(frame);
+          return;
+        }
+        finish();
+      };
+      peelRaf = requestAnimationFrame(frame);
+      setTimeout(finish, PEEL_MS + 80);
+    });
+  }
+
+  function measureSpread(): { w: number; h: number } | null {
+    const wrap = containerEl?.querySelector<HTMLElement>(".double-wrap");
+    if (!wrap) return null;
+    const w = wrap.offsetWidth;
+    const h = wrap.offsetHeight;
+    if (w < 16 || h < 8) return null;
+    return { w, h };
+  }
+
+  function runSpreadPeelAnim(corner: ReturnType<typeof peelCorner>, w: number, h: number, fold: FoldHalf): Promise<void> {
+    return new Promise(resolve => {
+      const t0 = performance.now();
+      let settled = false;
+      const finish = (t = 1) => {
+        if (settled) return;
+        settled = true;
+        if (peelRaf) cancelAnimationFrame(peelRaf);
+        peelRaf = 0;
+        peelWait = null;
+        if (spreadFlip) {
+          spreadFlip = { ...spreadFlip, geom: peelGeometry(corner, 1, w, h, fold), shade: spreadShade(t) };
+        }
+        resolve();
+      };
+      peelWait = () => finish(1);
+      const frame = (now: number) => {
+        const t = Math.min(1, (now - t0) / FLIP_MS);
+        const geom = peelGeometry(corner, easeOutCubic(t), w, h, fold);
+        if (spreadFlip) spreadFlip = { ...spreadFlip, geom, shade: spreadShade(t) };
+        if (t < 1) {
+          peelRaf = requestAnimationFrame(frame);
+          return;
+        }
+        finish(1);
+      };
+      peelRaf = requestAnimationFrame(frame);
+      setTimeout(() => finish(1), FLIP_MS + 80);
+    });
+  }
+
+  async function srcForPage(pg: number): Promise<string | null> {
+    const url = readerState.pageUrls[pg - 1];
+    if (!url) return null;
+    const src = await resolveUrl(url, 999);
+    await waitDecoded(src);
+    return src;
+  }
+
+  async function playSpreadFlip(dir: 1 | -1): Promise<boolean> {
+    const groups = pageGroups;
+    if (!groups.length) return false;
+    const from = readerState.pageNumber;
+    const gi = groups.findIndex(g => g.includes(from));
+    if (gi < 0) return false;
+    const toGi = gi + dir;
+    if (toGi < 0 || toGi >= groups.length) return false;
+
+    const fromFile = groups[gi];
+    const toFile   = groups[toGi];
+    const fromVis  = rtl ? [...fromFile].reverse() : [...fromFile];
+    const toVis    = rtl ? [...toFile].reverse() : [...toFile];
+    const fromLay  = spreadLayout(fromVis, rtl);
+    const toLay    = spreadLayout(toVis, rtl);
+
+    const fromRight = rtl ? dir === -1 : dir === 1;
+    if (fromRight && fromLay.right == null) return false;
+    if (!fromRight && fromLay.left == null) return false;
+
+    const corner = peelCorner(dir, rtl);
+    const fold: FoldHalf = fromRight ? "right" : "left";
+    const box    = measureSpread();
+    if (!box) return false;
+    const chapterId = readerState.activeChapter?.id;
+
+    readerState.turnDir = dir;
+    readerState.turning = true;
+
+    try {
+      const srcOf = async (pg: number | null): Promise<string | null> => {
+        if (pg == null) return null;
+        const i = currentGroup.indexOf(pg);
+        if (i >= 0 && currentGroupSrcs[i]) return currentGroupSrcs[i];
+        return srcForPage(pg);
+      };
+      const toLeft       = await srcOf(toLay.left);
+      const toRight      = await srcOf(toLay.right);
+      const fromLeft     = await srcOf(fromLay.left);
+      const fromRightSrc = await srcOf(fromLay.right);
+      if (fromRight && !fromRightSrc) return false;
+      if (!fromRight && !fromLeft) return false;
+      if (toLay.left != null && !toLeft) return false;
+      if (toLay.right != null && !toRight) return false;
+      if (readerState.activeChapter?.id !== chapterId) return false;
+      if (readerState.pageNumber !== from) return false;
+
+      spreadFlip = {
+        fromRight,
+        foldFull:   false,
+        boxW:       box.w,
+        boxH:       box.h,
+        geom:       peelGeometry(corner, 0, box.w, box.h, fold),
+        shade:      1,
+        underLeft:  toLeft,
+        underRight: toRight,
+        underFull:  null,
+        outLeft:    fromLeft,
+        outRight:   fromRightSrc,
+        outFull:    null,
+        flapSrc:    fromRight ? toLeft : toRight,
+        fromStart:  gi === 0,
+        fromEnd:    gi === groups.length - 1,
+        toStart:    toGi === 0,
+        toEnd:      toGi === groups.length - 1,
+      };
+      await tick();
+      await runSpreadPeelAnim(corner, box.w, box.h, fold);
+      if (readerState.activeChapter?.id !== chapterId) return false;
+
+      currentGroupSrcs = toVis.map(pg => {
+        if (toLay.left === pg) return toLeft;
+        if (toLay.right === pg) return toRight;
+        return toLeft ?? toRight;
+      });
+      srcGroupKey = toVis.join(",");
+      readerState.pageNumber = toFile[0];
+      spreadFlip = null;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (peelRaf) cancelAnimationFrame(peelRaf);
+      peelRaf = 0;
+      peelWait?.();
+      peelWait = null;
+      spreadFlip = null;
+      readerState.turning = false;
+    }
+  }
+
+  async function playBoundaryFlip(dir: 1 | -1): Promise<boolean> {
+    const groups = pageGroups;
+    if (!groups.length) return false;
+    const from = readerState.pageNumber;
+    const gi = groups.findIndex(g => g.includes(from));
+    if (gi < 0) return false;
+
+    const fromFile = groups[gi];
+    if (fromFile.length !== 1) return false;
+
+    let adjacentUrls: string[] | null;
+    let toFile: number[];
+    if (dir === 1) {
+      if (gi !== groups.length - 1) return false;
+      adjacentUrls = getNextPrefetchUrls();
+      if (!adjacentUrls) return false;
+      const nextGroups = buildPageGroups(adjacentUrls, settingsState.settings.offsetDoubleSpreads ?? false);
+      toFile = nextGroups.length > 1 ? nextGroups[1] : nextGroups[0];
+    } else {
+      if (gi !== 0) return false;
+      adjacentUrls = getPrevPrefetchUrls();
+      if (!adjacentUrls) return false;
+      const prevGroups = buildPageGroups(adjacentUrls, settingsState.settings.offsetDoubleSpreads ?? false);
+      const last = prevGroups[prevGroups.length - 1];
+      toFile = last.length === 1 && prevGroups.length > 1 ? prevGroups[prevGroups.length - 2] : last;
+    }
+
+    const boundarySrc = dir === 1 ? readerState.boundaryNextSrc : readerState.boundaryPrevSrc;
+    const fromVis = rtl ? [...fromFile].reverse() : [...fromFile];
+    const toVis   = rtl ? [...toFile].reverse()   : [...toFile];
+    const fromLay = spreadLayout(fromVis, rtl);
+    const toLay   = spreadLayout(toVis, rtl);
+
+    const fromRight = rtl ? dir === -1 : dir === 1;
+    const corner = peelCorner(dir, rtl);
+    const fold: FoldHalf = fromRight ? "right" : "left";
+    const box = measureSpread();
+    if (!box) return false;
+    const chapterId = readerState.activeChapter?.id;
+
+    readerState.turnDir = dir;
+    readerState.turning = true;
+
+    try {
+      const srcOfAdjacent = async (pg: number | null): Promise<string | null> => {
+        if (pg == null || !adjacentUrls) return null;
+        const url = adjacentUrls[pg - 1];
+        if (!url) return null;
+        const src = await resolveUrl(url, 999);
+        await waitDecoded(src);
+        return src;
+      };
+
+      const fromLeft     = fromLay.left  != null ? await srcForPage(fromLay.left)  : boundarySrc;
+      const fromRightSrc = fromLay.right != null ? await srcForPage(fromLay.right) : boundarySrc;
+      const toLeft        = await srcOfAdjacent(toLay.left);
+      const toRight       = await srcOfAdjacent(toLay.right);
+      if (fromRight && !fromRightSrc) return false;
+      if (!fromRight && !fromLeft) return false;
+      if (toLay.left != null && !toLeft) return false;
+      if (toLay.right != null && !toRight) return false;
+      if (readerState.activeChapter?.id !== chapterId) return false;
+      if (readerState.pageNumber !== from) return false;
+
+      spreadFlip = {
+        fromRight,
+        foldFull:   false,
+        boxW:       box.w,
+        boxH:       box.h,
+        geom:       peelGeometry(corner, 0, box.w, box.h, fold),
+        shade:      1,
+        underLeft:  toLeft,
+        underRight: toRight,
+        underFull:  null,
+        outLeft:    fromLeft,
+        outRight:   fromRightSrc,
+        outFull:    null,
+        flapSrc:    fromRight ? toLeft : toRight,
+        fromStart:  gi === 0,
+        fromEnd:    gi === groups.length - 1,
+        toStart:    false,
+        toEnd:      false,
+      };
+      await tick();
+      await runSpreadPeelAnim(corner, box.w, box.h, fold);
+      if (readerState.activeChapter?.id !== chapterId) return false;
+
+      spreadFlip = null;
+      onCrossBoundary(dir, toFile[0]);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (peelRaf) cancelAnimationFrame(peelRaf);
+      peelRaf = 0;
+      peelWait?.();
+      peelWait = null;
+      spreadFlip = null;
+      readerState.turning = false;
+    }
+  }
+
+  /** Auto corner-peel or spread flip. Commits pageNumber after the outgoing layer is gone. */
+  export async function playPeel(dir: 1 | -1): Promise<boolean> {
+    if (readerState.turning) return false;
+    if (readerState.inspectScale > 1) return false;
+    if (!pageReady) return false;
+    if (style === "double") return (await playSpreadFlip(dir)) || playBoundaryFlip(dir);
+    if (style !== "single" && style !== "auto") return false;
+    if (!currentSrc) return false;
+
+    const from = readerState.pageNumber;
+    const to   = from + dir;
+    const urls = readerState.pageUrls;
+    const url  = urls[to - 1];
+    if (!url) return false;
+
+    const chapterId = readerState.activeChapter?.id;
+    const box = measureOutgoing();
+    if (!box) return false;
+
+    readerState.turnDir = dir;
+    readerState.turning = true;
+
+    try {
+      const incoming = await resolveUrl(url, 999);
+      await waitDecoded(incoming);
+      if (readerState.activeChapter?.id !== chapterId) return false;
+      if (readerState.pageNumber !== from) return false;
+
+      incomingPeelSrc = incoming;
+      const corner = peelCorner(dir, rtl);
+      peelGeom = peelGeometry(corner, 0, box.w, box.h);
+      await runPeelAnim(corner, box.w, box.h);
+      if (readerState.activeChapter?.id !== chapterId) return false;
+
+      currentSrc = incoming;
+      srcPage = to;
+      srcUrl = url;
+      incomingPeelSrc = null;
+      peelGeom = null;
+      readerState.pageNumber = to;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (peelRaf) cancelAnimationFrame(peelRaf);
+      peelRaf = 0;
+      peelWait?.();
+      peelWait = null;
+      incomingPeelSrc = null;
+      peelGeom = null;
+      spreadFlip = null;
+      readerState.turning = false;
+    }
+  }
 
   $effect(() => {
     void readerState.pageNumber;
@@ -182,41 +580,39 @@
     if (scrollTotal - scrollBottom < containerEl.clientHeight * 1.5) onAppend();
   }
 
-  const INSPECT_ZOOM_STEP = 0.15;
-  const INSPECT_ZOOM_MAX  = 8;
-
   let containerEl = $state<HTMLDivElement | undefined>();
   let stripRef: LongstripViewer | undefined = $state();
+  let pinch: PinchTracker | null = null;
 
   export function captureAnchor()              { stripRef?.captureAnchor(); }
   export function restoreAnchor()              { stripRef?.restoreAnchor(); }
   export function notifyScrollCenter(idx: number)        { stripRef?.notifyScrollCenter(idx); }
   export async function scrollToFlatIndex(idx: number)   { await stripRef?.scrollToFlatIndex(idx); }
 
-  function getInspectImageEl(): HTMLElement | null {
-    if (!containerEl) return null;
-    return (
-      containerEl.querySelector<HTMLElement>(".inspect-wrap .double-wrap") ??
-      containerEl.querySelector<HTMLElement>(".inspect-wrap img")
-    );
-  }
+  const gestures = createPageGestures({
+    getContainer:    () => containerEl,
+    isLongstrip:     () => style === "longstrip",
+    getRtl:          () => rtl,
+    getInspectScale: () => readerState.inspectScale,
+    getPan:          () => ({ x: readerState.inspectPanX, y: readerState.inspectPanY }),
+    setInspect:      (scale, panX, panY) => {
+      readerState.inspectScale = scale;
+      readerState.inspectPanX  = panX;
+      readerState.inspectPanY  = panY;
+    },
+    getPinch:        () => pinch,
+    onSwipe,
+    onWheelNav:      onWheel,
+    getStrip:        () => stripRef,
+  });
 
-  function clampInspectPan(scale: number, px: number, py: number): [number, number] {
-    const img = getInspectImageEl();
-    if (!img) return [px, py];
-    const maxX = Math.max(0, (img.offsetWidth  * (scale - 1)) / 2);
-    const maxY = Math.max(0, (img.offsetHeight * (scale - 1)) / 2);
-    return [Math.max(-maxX, Math.min(maxX, px)), Math.max(-maxY, Math.min(maxY, py))];
-  }
-
-  let inspectDragging   = false;
-  let inspectDragMoved  = false;
-  let inspectDragStartX = 0;
-  let inspectDragStartY = 0;
-  let inspectPanStartX  = 0;
-  let inspectPanStartY  = 0;
-
-  let pinch: PinchTracker | null = null;
+  export const onInspectMouseDown = gestures.onInspectMouseDown;
+  export const onInspectMouseMove = gestures.onInspectMouseMove;
+  export const onInspectMouseUp   = gestures.onInspectMouseUp;
+  export const onPointerDown      = gestures.onPointerDown;
+  export const onPointerMove      = gestures.onPointerMove;
+  export const onPointerUp        = gestures.onPointerUp;
+  export const handleWheel        = gestures.onWheel;
 
   $effect(() => {
     if (pinchZoomEnabled) {
@@ -235,123 +631,11 @@
 
   $effect(() => { if (style !== "longstrip") readerState.resetInspect(); });
 
-  export function onInspectMouseDown(e: MouseEvent) {
-    if (e.button !== 0) return;
-    if ((e.target as Element).closest(".bar")) return;
-    if (style === "longstrip") { stripRef?.onMouseDown(e); return; }
-    if (readerState.inspectScale <= 1) return;
-    inspectDragging   = true;
-    inspectDragMoved  = false;
-    inspectDragStartX = e.clientX;
-    inspectDragStartY = e.clientY;
-    inspectPanStartX  = readerState.inspectPanX;
-    inspectPanStartY  = readerState.inspectPanY;
-    e.preventDefault();
-  }
-
-  export function onInspectMouseMove(e: MouseEvent) {
-    if (style === "longstrip") { stripRef?.onMouseMove(e); return; }
-    if (!inspectDragging) return;
-    if (!inspectDragMoved && Math.abs(e.clientX - inspectDragStartX) + Math.abs(e.clientY - inspectDragStartY) > 4) inspectDragMoved = true;
-    const rawX = inspectPanStartX + (e.clientX - inspectDragStartX);
-    const rawY = inspectPanStartY + (e.clientY - inspectDragStartY);
-    const [cx, cy] = clampInspectPan(readerState.inspectScale, rawX, rawY);
-    readerState.inspectPanX = cx;
-    readerState.inspectPanY = cy;
-  }
-
-  export function onInspectMouseUp() {
-    if (style === "longstrip") { stripRef?.onMouseUp(); return; }
-    inspectDragging = false;
-  }
-
-  const SWIPE_MIN_DIST = 50;
-
-  let swipeActive  = false;
-  let swipeStartX  = 0;
-  let swipeStartY  = 0;
-  let justSwiped   = false;
-
-  function swipeEligible(): boolean {
-    return style !== "longstrip" && readerState.inspectScale <= 1 && !pinch?.isPinching();
-  }
-
-  export function onPointerDown(e: PointerEvent) {
-    if (e.button !== 0) return;
-    if ((e.target as Element).closest(".bar")) return;
-    pinch?.onPointerDown(e);
-    if (style === "longstrip") { stripRef?.onPointerDown(e); return; }
-    if (swipeEligible() && readerState.inspectScale <= 1) {
-      swipeActive = true;
-      swipeStartX = e.clientX;
-      swipeStartY = e.clientY;
-    }
-  }
-
-  export function onPointerMove(e: PointerEvent) {
-    if (pinch?.isPinching()) { pinch.onPointerMove(e); swipeActive = false; return; }
-    if (style === "longstrip") { stripRef?.onPointerMove(e); return; }
-    if (inspectDragging) {
-      if (!inspectDragMoved && Math.abs(e.clientX - inspectDragStartX) + Math.abs(e.clientY - inspectDragStartY) > 4) inspectDragMoved = true;
-      const rawX = inspectPanStartX + (e.clientX - inspectDragStartX);
-      const rawY = inspectPanStartY + (e.clientY - inspectDragStartY);
-      const [cx, cy] = clampInspectPan(readerState.inspectScale, rawX, rawY);
-      readerState.inspectPanX = cx;
-      readerState.inspectPanY = cy;
-    }
-  }
-
-  export function onPointerUp(e: PointerEvent) {
-    pinch?.onPointerUp(e);
-    if (!pinch?.isPinching()) {
-      if (style === "longstrip") { stripRef?.onPointerUp(); return; }
-      inspectDragging = false;
-    }
-    if (swipeActive) {
-      swipeActive = false;
-      const dx = e.clientX - swipeStartX;
-      const dy = e.clientY - swipeStartY;
-      if (Math.abs(dx) >= SWIPE_MIN_DIST && Math.abs(dx) > Math.abs(dy)) {
-        const draggedLeft = dx < 0;
-        justSwiped = true;
-        onSwipe(rtl ? !draggedLeft : draggedLeft);
-      }
-    }
-  }
-
-  export function handleWheel(e: WheelEvent) {
-    if (style === "longstrip") {
-      if (e.ctrlKey) onWheel(e);
-      else stripRef?.onWheel(e);
-      return;
-    }
-    if (!e.ctrlKey) { onWheel(e); return; }
-    e.preventDefault();
-    const delta = e.deltaY < 0 ? INSPECT_ZOOM_STEP : -INSPECT_ZOOM_STEP;
-    const next  = Math.max(1, Math.min(INSPECT_ZOOM_MAX, readerState.inspectScale + delta));
-    if (next === readerState.inspectScale) return;
-    if (next === 1) { readerState.inspectScale = 1; readerState.inspectPanX = 0; readerState.inspectPanY = 0; return; }
-    const img    = getInspectImageEl();
-    const anchor = img ?? containerEl ?? null;
-    const rect   = anchor?.getBoundingClientRect();
-    const cx     = rect ? e.clientX - rect.left - rect.width  / 2 : 0;
-    const cy     = rect ? e.clientY - rect.top  - rect.height / 2 : 0;
-    const ratio  = next / readerState.inspectScale;
-    const [clampedX, clampedY] = clampInspectPan(next, cx + (readerState.inspectPanX - cx) * ratio, cy + (readerState.inspectPanY - cy) * ratio);
-    readerState.inspectScale = next;
-    readerState.inspectPanX  = clampedX;
-    readerState.inspectPanY  = clampedY;
-  }
-
   let tapTimer: ReturnType<typeof setTimeout> | null = null;
 
   function handleTap(e: MouseEvent) {
-    if (justSwiped) { justSwiped = false; return; }
-    if (style === "longstrip") {
-      if (stripRef?.consumeTap()) return;
-      return;
-    }
-    if (inspectDragMoved) { inspectDragMoved = false; return; }
+    if (gestures.consumeTap()) return;
+    if (style === "longstrip") return;
     if (tapToToggleBar) {
       if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; return; }
       tapTimer = setTimeout(() => { tapTimer = null; onTap(e); }, 220);
@@ -388,7 +672,10 @@
   onscroll={style === "longstrip" ? handleScroll : undefined}
   onmousedown={onInspectMouseDown}
   onpointerdown={onPointerDown}
-  onwheel={(e) => { if (e.ctrlKey || style !== "longstrip") e.preventDefault(); }}
+  onwheel={(e) => {
+    if (e.ctrlKey || style !== "longstrip") e.preventDefault();
+    handleWheel(e);
+  }}
   onkeydown={(e) => {
     if (e.key === " " && style === "longstrip") {
       e.preventDefault();
@@ -422,13 +709,16 @@
   {:else if pageReady}
     <div
       class="page-stage"
-      class:turning
-      style="--turn-x:{transition === 'slide' ? `${turnDir * 40}%` : '0'};--turn-deg:{transition === 'flip' ? `${turnDir * 70}deg` : '0deg'};--turn-op:{transition === 'none' ? 1 : (turning ? 0 : 1)};--turn-speed:{transition === 'fade' ? '0.1s' : '0.18s'}"
+      class:turning={turning && transition !== "flip"}
+      style="--turn-x:{transition === 'slide' ? `${turnDir * 40}%` : '0'};--turn-deg:0deg;--turn-op:{transition === 'none' ? 1 : ((transition === 'flip' && !readerState.boundaryFading) ? 1 : (turning ? 0 : 1))};--turn-speed:0.1s"
     >
       {#if style === "double"}
-        <DoubleViewer {imgCls} {currentGroup} srcs={currentGroupSrcs} {pageGroups} />
+        <DoubleViewer
+          {imgCls} {currentGroup} srcs={currentGroupSrcs} {pageGroups} {rtl} flip={spreadFlip}
+          boundaryPrevSrc={readerState.boundaryPrevSrc} boundaryNextSrc={readerState.boundaryNextSrc}
+        />
       {:else}
-        <SingleViewer {imgCls} src={currentSrc} />
+        <SingleViewer {imgCls} src={currentSrc} incomingSrc={incomingPeelSrc} peel={peelGeom} />
       {/if}
     </div>
   {/if}
@@ -456,6 +746,8 @@
 
   .page-stage {
     display: flex;
+    justify-content: center;
+    width: 100%;
     perspective: 1200px;
     transform: translateX(0) rotateY(0deg);
     opacity: var(--turn-op, 1);
